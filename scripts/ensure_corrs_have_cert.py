@@ -52,7 +52,7 @@ def choosefile():
 #choosefile()
 
 def main(argv: list[str]):
-    if len(argv) != 1 or argv[0] in {"-h", "--help"}:
+    if len(argv) != 2 or argv[0] in {"-h", "--help"}:
         print(__doc__.strip())
         print("Received inputs:", argv)
         return 1
