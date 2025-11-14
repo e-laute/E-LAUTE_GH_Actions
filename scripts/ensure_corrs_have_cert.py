@@ -49,8 +49,10 @@ def choosefile():
 #choosefile()
 
 def main(argv: list[str]):
+    """ Ensure that all <corr> elements in the given MEI file have a 'cert' attribute. Requires one argument: path to the MEI file."""
     if len(argv) != 1 or argv[0] in {"-h", "--help"}:
         print(__doc__.strip())
+        print("Received inputs:", argv)
         return 1
 
     mei_path = Path(argv[0])
