@@ -48,7 +48,7 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run shared Python script
         run: |
-          python shared-actions/scripts/ensure_corrs_have_cert.py {{inputs.filename}}
+          python shared-actions/scripts/ensure_corrs_have_cert.py ${{ inputs.filename }}
 
       # 6. Commit changes
       - name: commit changes
