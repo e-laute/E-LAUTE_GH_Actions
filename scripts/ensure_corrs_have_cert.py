@@ -78,7 +78,7 @@ def main(argv: list[str]):
         print("Received inputs:", argv)
         return 1
 
-    mei_path = Path(argv[0])
+    mei_path = Path(argv[1])
     print(f"Checking file: {mei_path}")
     
     if not mei_path.is_file():
