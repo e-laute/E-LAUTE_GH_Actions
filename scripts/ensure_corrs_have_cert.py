@@ -16,16 +16,31 @@ ns = {"mei":"http://www.music-encoding.org/ns/mei",
 
 def ensure_cert(file:str):
     """ensure corr has cert"""
+    print(f"::group::Processing {file}")
+    
     with open(file, "rb") as f:
         tree = ET.parse(f,ET.XMLParser(recover=True))
+    
+    if tree is None:
+        raise ValueError(f"Failed to parse XML from file: {file}")
+    
     root = tree.getroot()
+    
+    if root is None:
+        raise ValueError(f"Failed to get root element from XML tree: {file}")
+    
     try: 
         #remove before adding again
         corrs = root.xpath("//mei:choice/mei:corr", namespaces=ns)
+        print(f"Found {len(corrs)} <corr> elements")
 
+        modified_count = 0
         for corr in corrs:
             if corr.get("cert") is None:
                 corr.set("cert","medium")
+                modified_count += 1
+        
+        print(f"Added 'cert' attribute to {modified_count} <corr> elements")
 
 
         ET.register_namespace("mei", ns["mei"])
@@ -38,8 +53,13 @@ def ensure_cert(file:str):
         # Write back, preserving XML declaration and processing instructions
         with open(file, "wb") as f:
             tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+        
+        print(f"::notice::Successfully updated {file}")
+        print("::endgroup::")
     except Exception as e:
-        print(f"Error processing file {file}: {e}")
+        print("::endgroup::")
+        print(f"::error::Error processing file {file}: {e}")
+        raise
 
 def choosefile():
     dir_path = os.path.abspath(os.path.join(os.path.dirname(__file__)))
@@ -59,14 +79,18 @@ def main(argv: list[str]):
         return 1
 
     mei_path = Path(argv[0])
+    print(f"Checking file: {mei_path}")
+    
     if not mei_path.is_file():
-        print(f"Error: '{mei_path}' is not a file.", file=sys.stderr)
+        print(f"::error::File not found: '{mei_path}'")
         return 2
+    
     try:
         ensure_cert(mei_path)
+        print("::notice::Process completed successfully")
         return 0
     except Exception as e:
-        print(f"Error processing file: {e}", file=sys.stderr)
+        print(f"::error::Failed to process file: {e}")
         return 1
 
 if __name__ == "__main__":
