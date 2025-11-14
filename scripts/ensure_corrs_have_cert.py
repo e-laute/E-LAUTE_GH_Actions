@@ -77,8 +77,8 @@ def main(argv: list[str]):
         print(__doc__.strip())
         print("Received inputs:", argv)
         return 1
-
-    mei_path = Path(argv[1])
+    # hardcode 'caller-repo/' prefix to refer to caller (source) repository
+    mei_path = Path('caller-repo') / Path(argv[1])
     print(f"Checking file: {mei_path}")
     
     if not mei_path.is_file():
