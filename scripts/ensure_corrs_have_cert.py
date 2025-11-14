@@ -19,26 +19,27 @@ def ensure_cert(file:str):
     with open(file, "rb") as f:
         tree = ET.parse(f,ET.XMLParser(recover=True))
     root = tree.getroot()
+    try: 
+        #remove before adding again
+        corrs = root.xpath("//mei:choice/mei:corr", namespaces=ns)
+
+        for corr in corrs:
+            if corr.get("cert") is None:
+                corr.set("cert","medium")
 
 
-    #remove before adding again
-    corrs = root.xpath("//mei:choice/mei:corr", namespaces=ns)
+        ET.register_namespace("mei", ns["mei"])
+        ET.register_namespace("xml", ns["xml"])
+        ET.indent(tree,"   ")
 
-    for corr in corrs:
-        if corr.get("cert") is None:
-            corr.set("cert","medium")
+        #change processing instructiuns and version to mei 5.1
+            
 
-
-    ET.register_namespace("mei", ns["mei"])
-    ET.register_namespace("xml", ns["xml"])
-    ET.indent(tree,"   ")
-
-    #change processing instructiuns and version to mei 5.1
-        
-
-    # Write back, preserving XML declaration and processing instructions
-    with open(file, "wb") as f:
-        tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+        # Write back, preserving XML declaration and processing instructions
+        with open(file, "wb") as f:
+            tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+    except Exception as e:
+        print(f"Error processing file {file}: {e}")
 
 def choosefile():
     dir_path = os.path.abspath(os.path.join(os.path.dirname(__file__)))
