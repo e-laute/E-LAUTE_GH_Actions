@@ -1,3 +1,6 @@
+"""
+Ensure that all <corr> elements in the given MEI file have a 'cert' attribute. Requires one argument: path to the MEI file.
+"""
 import os
 import re
 from lxml import etree as ET
@@ -49,7 +52,6 @@ def choosefile():
 #choosefile()
 
 def main(argv: list[str]):
-    """ Ensure that all <corr> elements in the given MEI file have a 'cert' attribute. Requires one argument: path to the MEI file."""
     if len(argv) != 1 or argv[0] in {"-h", "--help"}:
         print(__doc__.strip())
         print("Received inputs:", argv)
@@ -59,7 +61,6 @@ def main(argv: list[str]):
     if not mei_path.is_file():
         print(f"Error: '{mei_path}' is not a file.", file=sys.stderr)
         return 2
-
     try:
         ensure_cert(mei_path)
         return 0
