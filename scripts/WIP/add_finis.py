@@ -41,7 +41,7 @@ def add_finis(file:str):
 
     measure = root.xpath("//mei:measure", namespaces=ns)[-1]
     layer = measure.find(".//mei:layer", namespaces=ns)
-    tstamp = measure_length(layer)*int(meterSig.get("count","4"))
+    tstamp = measure_length(layer)*int(meterSig.get("unit","4"))
     
     #for fin in finis:
     #    fin.set("tstamp",str(tstamp))
