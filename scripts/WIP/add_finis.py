@@ -24,7 +24,7 @@ def measure_length(elem:ET.Element):
 
 
 
-def remove_second_fermata(file:str):
+def add_finis(file:str):
     """adds finis on the last tstamp+1 of the last measure, doesnt account for mark-up or n-tuplets"""
     with open(file, "rb") as f:
         tree = ET.parse(f,ET.XMLParser(recover=True))
@@ -32,19 +32,25 @@ def remove_second_fermata(file:str):
 
 
     #remove before adding again
-    finis = root.xpath("//mei:dir[text()='finis']", namespaces=ns)
-    finis.extend(root.xpath("//mei:dir[text()='Finis']", namespaces=ns))
+    finis = root.xpath("//mei:dir[@type='finis']", namespaces=ns)
+
+    if finis:
+        return
+    
+    meterSig = root.find(".//mei:meterSig", namespaces=ns)
 
     measure = root.xpath("//mei:measure", namespaces=ns)[-1]
     layer = measure.find(".//mei:layer", namespaces=ns)
-    tstamp = measure_length(layer)*4
+    tstamp = measure_length(layer)*int(meterSig.get("count","4"))
     
-    for fin in finis:
-        fin.set("tstamp",str(tstamp))
+    #for fin in finis:
+    #    fin.set("tstamp",str(tstamp))
 
-    if not finis:
-        dir = ET.SubElement(measure,"dir",{"staff":"1", "tstamp":str(tstamp), "place":"within", "type":"finis"})
-        dir.text = "Finis"
+    #if not finis:
+    dir = ET.SubElement(measure,"dir",{"staff":"2", "tstamp":str(tstamp), "place":"above", "type":"finis"})
+    dir.text = "Finis"
+
+    print(f"added finis to {file}")
 
 
     ET.register_namespace("mei", ns["mei"])
@@ -73,7 +79,7 @@ def choosefile():
         if "converted" in root:
             continue
         for file in files:
-            if re.fullmatch(r".*_enc_dipl_GLT\.mei",file)!=None:
-                remove_second_fermata(os.path.join(root,file))
+            if re.fullmatch(r".*_enc_ed_CMN\.mei",file)!=None:
+                add_finis(os.path.join(root,file))
 
 choosefile()
