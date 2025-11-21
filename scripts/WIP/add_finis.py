@@ -12,11 +12,9 @@ ns = {"mei":"http://www.music-encoding.org/ns/mei",
 def measure_length(elem:ET.Element):
     tstamp = 0.
     for child in elem:
-        print(child.tag)
         if child.tag == "{http://www.music-encoding.org/ns/mei}beam":
             tstamp+=measure_length(child)
         if child.tag == "{http://www.music-encoding.org/ns/mei}note" or child.tag == "{http://www.music-encoding.org/ns/mei}chord" or child.tag == "{http://www.music-encoding.org/ns/mei}tabGrp":
-            print(tstamp)
             dur=float(child.attrib.get("dur"))
             tstamp += 2/dur - 1/(dur*2**int(child.attrib.get("dots",0)))
     return tstamp
@@ -48,15 +46,17 @@ def add_finis(file:str):
         measure = fin.xpath("(ancestor::mei:measure)[1]", namespaces=ns)[0]
         layer = measure.find(".//mei:layer", namespaces=ns)
         tstamp = measure_length(layer)
-        if meterSig:
+        if meterSig is not None:
             tstamp = tstamp*int(meterSig.get("unit","4"))
         else:
             tstamp *= 4
-            for _ in 10:
+            for _ in range(10):
+                if tstamp.is_integer():
+                    break
                 tstamp *= 2
-                if not tstamp.is_integer():
-                    print(f"{fin.attrib} has problematic tstamp calculation")
-                    return
+            else:
+                print(f"{fin.attrib} has problematic tstamp calculation")
+                return
         fin.set("tstamp",str(tstamp+1))
         fin.set("startho","5vu")
 
@@ -90,7 +90,7 @@ def choosefile():
         if "converted" in root:
             continue
         for file in files:
-            if re.fullmatch(r".*_enc_ed_CMN\.mei",file)!=None:
+            if re.fullmatch(r"Jud.*_enc_(ed|dipl)_(CMN|GLT)\.mei",file)!=None:
                 add_finis(os.path.join(root,file))
 
 choosefile()
