@@ -31,26 +31,24 @@ def add_finis(file:str):
     root = tree.getroot()
 
 
-    #remove before adding again
-    finis = root.xpath("//mei:dir[@type='finis']", namespaces=ns)
-
-    if finis:
-        return
-    
     meterSig = root.find(".//mei:meterSig", namespaces=ns)
 
-    measure = root.xpath("//mei:measure", namespaces=ns)[-1]
-    layer = measure.find(".//mei:layer", namespaces=ns)
-    tstamp = measure_length(layer)*int(meterSig.get("unit","4"))
-    
-    #for fin in finis:
-    #    fin.set("tstamp",str(tstamp))
+    #remove before adding again
+    finis = root.xpath("//mei:dir[@type='finis']", namespaces=ns)
+    if not finis:  
+        return  
+        measure = root.xpath("//mei:measure", namespaces=ns)[-1]
+        layer = measure.find(".//mei:layer", namespaces=ns)
+        tstamp = measure_length(layer)*int(meterSig.get("unit","4"))
+        dir = ET.SubElement(measure,"dir",{"staff":"2", "tstamp":str(tstamp), "place":"above", "type":"finis"})
+        dir.text = "Finis"
+        print(f"added finis to {file}")
 
-    #if not finis:
-    dir = ET.SubElement(measure,"dir",{"staff":"2", "tstamp":str(tstamp), "place":"above", "type":"finis"})
-    dir.text = "Finis"
+    for fin in finis:
+        fin.set("tstamp",str(tstamp))
 
-    print(f"added finis to {file}")
+
+
 
 
     ET.register_namespace("mei", ns["mei"])
