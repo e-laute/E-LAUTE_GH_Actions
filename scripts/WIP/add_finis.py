@@ -45,7 +45,20 @@ def add_finis(file:str):
         print(f"added finis to {file}")
 
     for fin in finis:
-        fin.set("tstamp",str(tstamp))
+        measure = fin.xpath("(ancestor::mei:measure)[1]", namespaces=ns)[0]
+        layer = measure.find(".//mei:layer", namespaces=ns)
+        tstamp = measure_length(layer)
+        if meterSig:
+            tstamp = tstamp*int(meterSig.get("unit","4"))
+        else:
+            tstamp *= 4
+            for _ in 10:
+                tstamp *= 2
+                if not tstamp.is_integer():
+                    print(f"{fin.attrib} has problematic tstamp calculation")
+                    return
+        fin.set("tstamp",str(tstamp+1))
+        fin.set("startho","5vu")
 
 
 
