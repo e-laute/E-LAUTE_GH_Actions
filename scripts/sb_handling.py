@@ -39,3 +39,25 @@ def add_sbs_every_n(root:etree.Element,n:int=5):
 
     
     return root
+
+
+def remove_sbs(root:etree.Element):
+    """Remove all sbs.
+
+    Args:
+      root: The root of the parsed tree of the MEI-file.
+
+    Returns:
+      The changed root.
+
+    Raises:
+      Error-type: Any potential Errors.
+    """
+
+    sbs = root.xpath(".//mei:sb", namespaces=ns)
+    
+    for sb in sbs:
+        parent = sb.getparent()
+        parent.remove(sb)
+
+    return root
