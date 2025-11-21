@@ -35,3 +35,25 @@ def edit_appInfo(root:etree.Element,p_description:str):
     name.text = p_description
     
     return root
+
+def dur_length(elem:etree.Element):
+    """Recursively adds up all @dur in subtree while accounting for @dots.
+
+    Args:
+      elem: Root of a MEI-Subtree.
+
+    Returns:
+      Float which represents the combined dur in Quavers.
+
+    Raises:
+      Error-type: Any potential Errors.
+    """
+
+    totaldur = 0.
+    for child in elem:
+        if "dur" in child.attrib:
+            dur = float(child.attrib.get("dur"))
+            totaldur += 2/dur - 1 / (dur * 2 ** int(child.attrib.get("dots","0")))
+        elif child:
+            totaldur += dur_length(child)
+    return totaldur
