@@ -4,7 +4,7 @@ from lxml import etree
 import copy
 import sys
 import math
-from utils import edit_appInfo
+from utils import *
 
 
 ns = {"mei":"http://www.music-encoding.org/ns/mei",
@@ -29,7 +29,5 @@ def function(root:etree.Element):
     output_str = ""
 
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
-
-    root = edit_appInfo(root,"Function description")
     
     return root,output_str
