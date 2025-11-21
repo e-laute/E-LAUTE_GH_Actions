@@ -24,7 +24,7 @@ def combine_elems(elem1:ET.Element,elem2:ET.Element,ignore:tuple=()):
     for child in list(elem2):
         if child.tag in ignore:
             continue
-        tstamps = child.xpath(".//mei:*[@tstamp]|seld::mei:*[@tstamp]",namespaces=ns)
+        tstamps = child.xpath(".//mei:*[@tstamp]|self::mei:*[@tstamp]",namespaces=ns)
         for tstamp in tstamps:
             tstamp.set("tstamp",str(float(tstamp.get("tstamp"))+add_tstamp))
         elem1.append(child)
