@@ -70,6 +70,8 @@ def combine_measure(file:str):
     ET.register_namespace("mei", ns["mei"])
     ET.register_namespace("xml", ns["xml"])
 
+    ET.indent(tree,"   ")
+
     # Write back, preserving XML declaration and processing instructions
     with open(file, "wb") as f:
         tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
