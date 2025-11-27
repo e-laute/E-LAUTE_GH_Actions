@@ -24,7 +24,7 @@ def combine_elems(elem1:ET.Element,elem2:ET.Element,ignore:tuple=()):
     for child in list(elem2):
         if child.tag in ignore:
             continue
-        tstamps = child.xpath(".//mei:*[@tstamp]",namespaces=ns)
+        tstamps = child.xpath(".//mei:*[@tstamp]|self::mei:*[@tstamp]",namespaces=ns)
         for tstamp in tstamps:
             tstamp.set("tstamp",str(float(tstamp.get("tstamp"))+add_tstamp))
         elem1.append(child)
@@ -44,8 +44,10 @@ def combine_measure(file:str):
         if "a" in n:
             n = n[:-1] + 'b'
         second_measures = root.xpath(f".//mei:measure[@n='{n}']",namespaces=ns)
-        if second_measures:
+        if second_measures and 'b' in n:
             second_measure = second_measures[0]
+        elif second_measures:
+            second_measure = second_measures[1]
         else:
             print(f"file has problem at n={first_measure.get("n")}")
             return
@@ -67,6 +69,8 @@ def combine_measure(file:str):
 
     ET.register_namespace("mei", ns["mei"])
     ET.register_namespace("xml", ns["xml"])
+
+    ET.indent(tree,"   ")
 
     # Write back, preserving XML declaration and processing instructions
     with open(file, "wb") as f:
