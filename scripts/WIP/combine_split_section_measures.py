@@ -33,7 +33,7 @@ def combine_measure(file:str):
 
     # Re-open to parse full document
     with open(file, "rb") as f:
-        tree = ET.parse(f)
+        tree = ET.parse(f,ET.XMLParser(recover=True))
     root = tree.getroot()
 
     first_measures = root.xpath(".//mei:measure[@right='invis']",namespaces=ns)
