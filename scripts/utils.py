@@ -26,7 +26,7 @@ def edit_appInfo(root:etree.Element,p_description:str):
       Error-type: Any potential Errors.
     """
 
-    applications = root.xpath(".//mei:application/name[text()='Github Action Scripts']")
+    applications = root.xpath(".//mei:application/name[text()='Github Action Scripts']", namespaces=ns)
 
     if not applications:
         app_Info = root.find(".//mei:appInfo", namespaces=ns)
@@ -41,7 +41,7 @@ def edit_appInfo(root:etree.Element,p_description:str):
         application.set("enddate",date.today().isoformat())
 
     p = etree.SubElement(application,"p")
-    name.text = p_description
+    p.text = p_description
     
     return root
 
