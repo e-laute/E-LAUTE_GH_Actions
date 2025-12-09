@@ -13,11 +13,11 @@ ns = {"mei":"http://www.music-encoding.org/ns/mei",
     
 
 def edit_appInfo(root:etree.Element,p_description:str):
-    """Adds <application> to <appInfo> with <p> containing p_description.
+    """Adds `<p>` containing p_description to `<application>` with `<name>` GitHub action Script under `<appInfo>`.
 
     Args:
       root: The root of the parsed tree of the MEI-file.
-      p_description: String to be added to a <p>-elem under <application>.
+      p_description: String to be added to a `<p>`-elem under `<application>`.
 
     Returns:
       The changed root.
@@ -47,7 +47,7 @@ def edit_appInfo(root:etree.Element,p_description:str):
     return root
 
 def dur_length(elem:etree.Element,ignore=["sic","orig"]):
-    """Recursively adds up all @dur in subtree while accounting for @dots.
+    """Recursively adds up all `@dur` in subtree while accounting for `@dots`.
 
     Args:
       elem: Root of a MEI-Subtree.
