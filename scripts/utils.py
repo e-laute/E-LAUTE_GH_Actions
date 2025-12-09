@@ -26,11 +26,20 @@ def edit_appInfo(root:etree.Element,p_description:str):
       Error-type: Any potential Errors.
     """
 
-    app_Info = root.find(".//mei:appInfo", namespaces=ns)
+    applications = root.xpath(".//mei:application/name[text()='Github Action Scripts']")
 
-    application = etree.SubElement(app_Info, "application", {"isodate":date.today().isoformat()})
-    name = etree.SubElement(application,"name")
-    name.text = "Github-Action Script"
+    if not applications:
+        app_Info = root.find(".//mei:appInfo", namespaces=ns)
+        application = etree.SubElement(app_Info, "application", {"isodate":date.today().isoformat()})
+        name = etree.SubElement(application,"name")
+        name.text = "Github Action Scripts"
+    else:
+        application = applications[0]
+        if application.get("isodate") is not None:
+            application.set("startdate",application.get("isodate"))
+            application.attrib.pop("isodate")
+        application.set("enddate",date.today().isoformat())
+
     p = etree.SubElement(application,"p")
     name.text = p_description
     
