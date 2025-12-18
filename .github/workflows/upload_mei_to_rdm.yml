@@ -54,8 +54,5 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run upload_mei.py script to upload all mei-files in the repository
         run: |
-          export RDM_TEST_API_TOKEN="${{ secrets.RDM_TEST_API_TOKEN_JJ }}"
-          export INPUT_PATH="${{ github.workspace }}/caller-repo"
-          cd shared-actions
           python -m scripts.upload_to_RDM.upload_mei --draft-one
         # python -m scripts.upload_to_RDM.upload_mei
