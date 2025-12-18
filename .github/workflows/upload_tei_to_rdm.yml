@@ -1,4 +1,4 @@
-name: Upload MEI files to TU-RDM
+name: Upload TEI files to TU-RDM
 
 on:
   workflow_call:
