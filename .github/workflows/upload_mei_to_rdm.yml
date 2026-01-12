@@ -39,6 +39,6 @@ jobs:
           export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
           cd shared-actions/scripts/
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests lxml pandas dotenv
           python -m upload_to_RDM.upload_meis --draft-one
         # python -m scripts/upload_to_RDM.upload_meis
