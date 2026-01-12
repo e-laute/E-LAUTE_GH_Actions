@@ -44,9 +44,7 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run shared Python script
         run: |
-          export ORG_SECRET="${{ secrets.ORG_SECRET}}"
           export GRAPHDB_URL="${{ secrets.GRAPHDB_URL}}"
-          export TEST_GRAPHDB_URL="${{ secrets.TEST_GRAPHDB_URL}}"
           export GRAPHDB_REPOSITORY="${{ secrets.GRAPHDB_REPOSITORY}}"
           export GRAPHDB_USERNAME="${{ secrets.GRAPHDB_USERNAME}}"
           export GRAPHDB_PASSWORD="${{ secrets.GRAPHDB_PASSWORD}}"
