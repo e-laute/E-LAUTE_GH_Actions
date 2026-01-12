@@ -8,15 +8,6 @@ on:
         required: false
         type: string
         default: "."
-    secrets:
-      GRAPHDB_URL:
-        required: true
-      GRAPHDB_REPOSITORY:
-        required: true
-      GRAPHDB_USERNAME:
-        required: true
-      GRAPHDB_PASSWORD:
-        required: true
 
 jobs:
   run-shared-script:
