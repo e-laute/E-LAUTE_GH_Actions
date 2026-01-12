@@ -39,14 +39,15 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r shared-actions/scripts/requirements.txt
+          pip install requests lxml
 
       # 5. Run the shared script *on the caller repo*
       - name: Run shared Python script
-        run: |
-          export GRAPHDB_URL="${{ secrets.GRAPHDB_URL}}"
-          export GRAPHDB_REPOSITORY="${{ secrets.GRAPHDB_REPOSITORY}}"
-          export GRAPHDB_USERNAME="${{ secrets.GRAPHDB_USERNAME}}"
-          export GRAPHDB_PASSWORD="${{ secrets.GRAPHDB_PASSWORD}}"
-          export INPUT_PATH="${{ github.workspace }}/caller-repo"
+        env: 
+          GRAPHDB_URL: "${{ secrets.GRAPHDB_URL}}"
+          GRAPHDB_REPOSITORY: "${{ secrets.GRAPHDB_REPOSITORY}}"
+          GRAPHDB_USERNAME: "${{ secrets.GRAPHDB_USERNAME}}"
+          GRAPHDB_PASSWORD: "${{ secrets.GRAPHDB_PASSWORD}}"
+          INPUT_PATH: "${{ github.workspace }}/caller-repo"
+        run: | 
           python shared-actions/scripts/upload_to_graphdb.py
