@@ -5,6 +5,9 @@ on:
     # secrets:
     #     RDM_TEST_API_TOKEN_JJ:
     #         required: false
+    secrets:
+      RDM_TEST_API_TOKEN_JJ:
+        required: true
 
 
 jobs:
