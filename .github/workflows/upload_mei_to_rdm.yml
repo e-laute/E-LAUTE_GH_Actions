@@ -2,17 +2,6 @@ name: Upload MEI files to TU-RDM
 
 on:
   workflow_call:
-    inputs:
-      repo-path:
-        description: "Relative path to caller repo checkout"
-        required: True
-        type: string
-        default: "."
-      # commit_message:
-      #   description: "The commit message"
-      #   required: False
-      #   default: "Uploaded MEI files to TU-RDM"
-      #   type: string
     secrets:
         RDM_TEST_API_TOKEN_JJ:
             required: true
@@ -54,5 +43,5 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run upload_mei.py script to upload all mei-files in the repository
         run: |
-          python -m scripts.upload_to_RDM.upload_mei --draft-one
-        # python -m scripts.upload_to_RDM.upload_mei
+          python -m scripts.upload_to_RDM.upload_meis --draft-one
+        # python -m scripts.upload_to_RDM.upload_meis
