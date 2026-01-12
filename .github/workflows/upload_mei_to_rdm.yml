@@ -2,9 +2,9 @@ name: Upload MEI files to TU-RDM
 
 on:
   workflow_call:
-    secrets:
-        RDM_TEST_API_TOKEN_JJ:
-            required: true
+    # secrets:
+    #     RDM_TEST_API_TOKEN_JJ:
+    #         required: false
 
 
 jobs:
