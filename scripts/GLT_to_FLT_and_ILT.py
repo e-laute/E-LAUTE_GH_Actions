@@ -38,7 +38,10 @@ def inject_xml_model_declaration(tree, file_name):
         file.write("\n".join(content_lines))
 
 
-def ensure_application_info(tree_root, input_filename, output_filename):
+# TODO: move to utils.py (coordinate with Henning)
+def ensure_application_info(
+    tree_root, input_filename, output_filename, version, name
+):
     ns = "{http://www.music-encoding.org/ns/mei}"
     app_info = tree_root.find(f".//{ns}appInfo")
     if app_info is None:
@@ -52,14 +55,10 @@ def ensure_application_info(tree_root, input_filename, output_filename):
 
     for existing_app in list(app_info.findall(f"{ns}application")):
         name_node = existing_app.find(f"{ns}name")
-        if (
-            name_node is not None
-            and (name_node.text or "").strip()
-            == "Derived through GLT-to-FLT-and-ILT-conversion-script"
-        ):
+        if name_node is not None and (name_node.text or "").strip() == name:
             app_info.remove(existing_app)
 
-    # Generate random 8-character ID: letter + 7 alphanumeric characters
+    # Generate xml:id: letter + 7 alphanumeric characters
     random_id = random.choice(string.ascii_lowercase) + "".join(
         random.choices(string.ascii_lowercase + string.digits, k=7)
     )
@@ -69,12 +68,12 @@ def ensure_application_info(tree_root, input_filename, output_filename):
         f"{ns}application",
         {
             "isodate": date.today().isoformat(),
-            "version": VERSION,
+            "version": version,
             "{http://www.w3.org/XML/1998/namespace}id": random_id,
         },
     )
     name = ET.SubElement(application, f"{ns}name")
-    name.text = "Derived through GLT-to-FLT-and-ILT-conversion-script"
+    name.text = name
 
     # Add conversion information
     p_from = ET.SubElement(application, f"{ns}p")
@@ -161,6 +160,8 @@ def process_mei_file(input_file, output_dir):
             tree_root,
             os.path.basename(input_file),
             os.path.basename(output_french),
+            VERSION,
+            "Derived through GLT-to-FLT-and-ILT-conversion-script",
         )
         inject_xml_model_declaration(tree, output_french)
 
@@ -173,6 +174,8 @@ def process_mei_file(input_file, output_dir):
             tree_root,
             os.path.basename(input_file),
             os.path.basename(output_italian),
+            VERSION,
+            "Derived through GLT-to-FLT-and-ILT-conversion-script",
         )
         inject_xml_model_declaration(tree, output_italian)
         return True
