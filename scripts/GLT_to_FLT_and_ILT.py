@@ -6,6 +6,8 @@ import string
 import xml.etree.ElementTree as ET
 from datetime import date
 
+VERSION = "1.0"  # Version of this conversion script
+
 GLT_to_F_and_ILT = ["enc_dipl_GLT.mei", "enc_ed_GLT.mei"]
 
 # XML declaration and model declarations
@@ -67,7 +69,7 @@ def ensure_application_info(tree_root, input_filename, output_filename):
         f"{ns}application",
         {
             "isodate": date.today().isoformat(),
-            "version": "1.0",
+            "version": VERSION,
             "{http://www.w3.org/XML/1998/namespace}id": random_id,
         },
     )
