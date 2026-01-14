@@ -1,6 +1,8 @@
 import argparse
 import os
+import random
 import shutil
+import string
 import xml.etree.ElementTree as ET
 from datetime import date
 
@@ -16,6 +18,9 @@ ET.register_namespace("", "http://www.music-encoding.org/ns/mei")
 
 # Inject XML file with proper model declarations
 def inject_xml_model_declaration(tree, file_name):
+    # Indent the tree for proper formatting
+    ET.indent(tree, space="  ", level=0)
+
     # Get the XML content as string without the declaration
     xml_content = ET.tostring(tree.getroot(), encoding="unicode")
 
@@ -31,7 +36,7 @@ def inject_xml_model_declaration(tree, file_name):
         file.write("\n".join(content_lines))
 
 
-def ensure_application_info(tree_root):
+def ensure_application_info(tree_root, input_filename, output_filename):
     ns = "{http://www.music-encoding.org/ns/mei}"
     app_info = tree_root.find(f".//{ns}appInfo")
     if app_info is None:
@@ -48,17 +53,33 @@ def ensure_application_info(tree_root):
         if (
             name_node is not None
             and (name_node.text or "").strip()
-            == "GLT-to-FLT-and-ILT-conversion-script"
+            == "Derived through GLT-to-FLT-and-ILT-conversion-script"
         ):
             app_info.remove(existing_app)
+
+    # Generate random 8-character ID: letter + 7 alphanumeric characters
+    random_id = random.choice(string.ascii_lowercase) + "".join(
+        random.choices(string.ascii_lowercase + string.digits, k=7)
+    )
 
     application = ET.SubElement(
         app_info,
         f"{ns}application",
-        {"isodate": date.today().isoformat(), "version": "1.0"},
+        {
+            "isodate": date.today().isoformat(),
+            "version": "1.0",
+            "{http://www.w3.org/XML/1998/namespace}id": random_id,
+        },
     )
     name = ET.SubElement(application, f"{ns}name")
-    name.text = "GLT-to-FLT-and-ILT-conversion-script"
+    name.text = "Derived through GLT-to-FLT-and-ILT-conversion-script"
+
+    # Add conversion information
+    p_from = ET.SubElement(application, f"{ns}p")
+    p_from.text = f"converted from {input_filename}"
+
+    p_to = ET.SubElement(application, f"{ns}p")
+    p_to.text = f"converted to {output_filename}"
 
 
 # Process MEI files to convert GLT to FLT and ILT
@@ -129,13 +150,16 @@ def process_mei_file(input_file, output_dir):
         staffDef.attrib.pop("tab.align", None)
         staffDef.attrib.pop("tab.anchorline", None)
 
-        ensure_application_info(tree_root)
-
         # write French file
         staffDef.set("notationtype", "tab.lute.french")
         if title_part_abbr is not None:
             title_part_abbr.text = "FLT"
             title_part_abbr.set("expan", "French Lute Tablature")
+        ensure_application_info(
+            tree_root,
+            os.path.basename(input_file),
+            os.path.basename(output_french),
+        )
         inject_xml_model_declaration(tree, output_french)
 
         # write Italian file
@@ -143,6 +167,11 @@ def process_mei_file(input_file, output_dir):
         if title_part_abbr is not None:
             title_part_abbr.text = "ILT"
             title_part_abbr.set("expan", "Italian Lute Tablature")
+        ensure_application_info(
+            tree_root,
+            os.path.basename(input_file),
+            os.path.basename(output_italian),
+        )
         inject_xml_model_declaration(tree, output_italian)
         return True
     except Exception as e:
@@ -150,68 +179,76 @@ def process_mei_file(input_file, output_dir):
         return False
 
 
+def process_directory_recursively(folder_path):
+    """Recursively process GLT.mei and CMN.mei files in the given folder and subfolders."""
+    output_dir = os.path.join(folder_path, "converted")
+    german_dir = os.path.join(output_dir, "GLT")
+    french_dir = os.path.join(output_dir, "FLT")
+    italian_dir = os.path.join(output_dir, "ILT")
+    cmn_dir = os.path.join(output_dir, "CMN")
+
+    for directory in (german_dir, french_dir, italian_dir, cmn_dir):
+        os.makedirs(directory, exist_ok=True)
+
+    # Process files in the current directory
+    for file in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file)
+
+        # Skip directories at this level (they'll be processed recursively)
+        if os.path.isdir(file_path):
+            continue
+
+        if file.endswith("GLT.mei"):
+            # Process the file to create FLT and ILT versions
+            if process_mei_file(file_path, output_dir):
+                # Copy the original GLT file to the GLT folder
+                shutil.copy(file_path, os.path.join(german_dir, file))
+            else:
+                print(f"Failed to process {file}")
+
+        elif file.endswith("CMN.mei"):
+            try:
+                # Copy CMN file to the CMN folder
+                shutil.copy(file_path, os.path.join(cmn_dir, file))
+            except Exception as e:
+                print(f"Failed to copy {file}: {str(e)}")
+
+    # Recursively process subdirectories
+    for item in os.listdir(folder_path):
+        item_path = os.path.join(folder_path, item)
+        if os.path.isdir(item_path) and item != "converted":
+            process_directory_recursively(item_path)
+
+
 def main():
+    """
+    Use as follows (locally in .venv):
+    python scripts/GLT_to_FLT_and_ILT.py <folder>
+
+    where <folder> is a relative or absolute path to process.
+    """
+
     parser = argparse.ArgumentParser(
         description="Convert GLT MEI files to FLT and ILT variants."
     )
     parser.add_argument(
         "folder",
-        nargs="?",
         help="Folder containing MEI files to convert (relative or absolute).",
     )
     args = parser.parse_args()
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # Resolve the target path
+    target_path = args.folder
+    if not os.path.isabs(target_path):
+        # Relative paths are resolved from the current working directory
+        target_path = os.path.abspath(target_path)
 
-    if args.folder:
-        target_path = args.folder
-        if not os.path.isabs(target_path):
-            target_path = os.path.join(base_dir, target_path)
-        if not os.path.isdir(target_path):
-            print(f"Target folder not found: {target_path}")
-            return
-        folders_to_process = [target_path]
-    else:
-        folders_to_process = [
-            os.path.join(base_dir, name)
-            for name in os.listdir(base_dir)
-            if name.startswith("Jud_1523-2")
-            and os.path.isdir(os.path.join(base_dir, name))
-        ]
-
-    if not folders_to_process:
-        print("No folders found to process.")
+    if not os.path.isdir(target_path):
+        print(f"Error: Target folder not found: {target_path}")
         return
 
-    for folder_path in folders_to_process:
-        output_dir = os.path.join(folder_path, "converted")
-        german_dir = os.path.join(output_dir, "GLT")
-        french_dir = os.path.join(output_dir, "FLT")
-        italian_dir = os.path.join(output_dir, "ILT")
-        cmn_dir = os.path.join(output_dir, "CMN")
-
-        for directory in (german_dir, french_dir, italian_dir, cmn_dir):
-            os.makedirs(directory, exist_ok=True)
-
-        # Look for GLT.mei and CMN.mei files in this folder
-        for file in os.listdir(folder_path):
-            if file.endswith("GLT.mei"):
-                input_file = os.path.join(folder_path, file)
-
-                # Process the file to create FLT and ILT versions
-                if process_mei_file(input_file, output_dir):
-                    # Copy the original GLT file to the GLT folder
-                    shutil.copy(input_file, os.path.join(german_dir, file))
-                else:
-                    print(f"Failed to process {file}")
-
-            elif file.endswith("CMN.mei"):
-                input_file = os.path.join(folder_path, file)
-                try:
-                    # Copy CMN file to the CMN folder
-                    shutil.copy(input_file, os.path.join(cmn_dir, file))
-                except Exception as e:
-                    print(f"Failed to copy {file}: {str(e)}")
+    print(f"Processing folder: {target_path}")
+    process_directory_recursively(target_path)
 
 
 if __name__ == "__main__":
