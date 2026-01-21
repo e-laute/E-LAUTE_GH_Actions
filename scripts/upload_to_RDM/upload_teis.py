@@ -588,7 +588,7 @@ def update_records_in_RDM(source_ids_to_update, draft_one=False):
                 current_value = current_metadata.get(field)
                 new_value = new_metadata.get(field)
 
-                if not rdm_upload_utils.deep_compare_metadata(
+                if not rdm_upload_utils.compare_hashed_files(
                     current_value, new_value
                 ):
                     metadata_changed = True

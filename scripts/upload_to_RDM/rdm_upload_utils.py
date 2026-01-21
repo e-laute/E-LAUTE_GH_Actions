@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import hashlib
 
 import pandas as pd
 
@@ -350,120 +351,27 @@ def upload_to_rdm(
     return failed_uploads
 
 
-def normalize_for_comparison(obj):
-    """Normalize data structures for more reliable comparison"""
-    if obj is None:
-        return None
-    elif isinstance(obj, str):
-        normalized = obj.strip()
-        return None if normalized == "" else normalized
-    elif isinstance(obj, list):
-        normalized_items = []
-        for item in obj:
-            if item is not None:
-                normalized_item = normalize_for_comparison(item)
-                if normalized_item is not None:
-                    normalized_items.append(normalized_item)
+def compare_hashed_files(current_value, new_value):
+    """
+    Compare two metadata values by hashing their raw JSON representation.
+    Any change (including whitespace, empty fields, ordering before JSON
+    normalization, etc.) will count as a difference.
+    """
 
+    def _hash_value(value):
         try:
-            return sorted(
-                normalized_items,
-                key=lambda x: (
-                    json.dumps(x, sort_keys=True)
-                    if isinstance(x, dict)
-                    else str(x)
-                ),
-            )
-        except (TypeError, ValueError):
-            return normalized_items
-    elif isinstance(obj, dict):
-        normalized_dict = {}
-        for k, v in obj.items():
-            normalized_value = normalize_for_comparison(v)
-            if normalized_value is not None:
-                normalized_dict[k] = normalized_value
-        return normalized_dict if normalized_dict else None
-    else:
-        return obj
-
-
-def deep_compare_metadata(current_value, new_value):
-    """Compare two metadata values with normalization"""
-    normalized_current = normalize_for_comparison(current_value)
-    normalized_new = normalize_for_comparison(new_value)
-
-    if normalized_current is None and normalized_new is None:
-        return True
-    if normalized_current is None or normalized_new is None:
-        return False
-
-    if isinstance(normalized_current, dict) and isinstance(
-        normalized_new, dict
-    ):
-        try:
-            current_json = json.dumps(
-                normalized_current,
+            serialized = json.dumps(
+                value,
                 sort_keys=True,
                 separators=(",", ":"),
+                ensure_ascii=False,
             )
-            new_json = json.dumps(
-                normalized_new,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            return current_json == new_json
         except (TypeError, ValueError):
-            if set(normalized_current.keys()) != set(normalized_new.keys()):
-                return False
-            for key in normalized_current.keys():
-                if not deep_compare_metadata(
-                    normalized_current[key], normalized_new[key]
-                ):
-                    return False
-            return True
+            serialized = str(value)
 
-    if isinstance(normalized_current, list) and isinstance(
-        normalized_new, list
-    ):
-        current_set = set()
-        new_set = set()
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
-        for item in normalized_current:
-            try:
-                item_str = (
-                    json.dumps(item, sort_keys=True)
-                    if isinstance(item, dict)
-                    else str(item)
-                )
-                current_set.add(item_str)
-            except (TypeError, ValueError):
-                current_set.add(str(item))
-
-        for item in normalized_new:
-            try:
-                item_str = (
-                    json.dumps(item, sort_keys=True)
-                    if isinstance(item, dict)
-                    else str(item)
-                )
-                new_set.add(item_str)
-            except (TypeError, ValueError):
-                new_set.add(str(item))
-
-        return current_set == new_set
-
-    try:
-        current_json = json.dumps(
-            normalized_current,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        new_json = json.dumps(
-            normalized_new, sort_keys=True, separators=(",", ":")
-        )
-        return current_json == new_json
-    except (TypeError, ValueError):
-        return normalized_current == normalized_new
+    return _hash_value(current_value) == _hash_value(new_value)
 
 
 # if __name__ == "__main__":
