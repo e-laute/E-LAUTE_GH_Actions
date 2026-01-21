@@ -19,13 +19,12 @@ def get_id_from_api(url):
         return None
 
 
-def setup_for_rdm_api_access(TESTING_MODE=True, GA_MODE=False):
+def setup_for_rdm_api_access(TESTING_MODE=True):
 
     # TODO: remove need for mapping file and url list
     # fetch that info from RDM
 
     TESTING_MODE = TESTING_MODE  # Set to False for production
-    GA_MODE = GA_MODE  # Set to True for GitHub Actions mode
 
     # see Stackoverflow: https://stackoverflow.com/a/66593457 about use in GitHub Actions
     # variable/secret needs to be passed in the GitHub Action
@@ -37,38 +36,18 @@ def setup_for_rdm_api_access(TESTING_MODE=True, GA_MODE=False):
         ELAUTE_COMMUNITY_ID = get_id_from_api(
             f"{RDM_API_URL}/communities/e-laute-test"
         )
-        if GA_MODE:
-            print("🧪 Running in GitHubActions TESTING mode")
-            RDM_API_TOKEN = os.environ["RDM_API_TEST_TOKEN_JJ"]
-        else:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-            print("🧪 Running in local TESTING mode")
-            RDM_API_TOKEN = os.getenv("RDM_TEST_API_TOKEN")
-
+        print("🧪 Running in GitHubActions TESTING mode")
+        RDM_API_TOKEN = os.environ["RDM_API_TEST_TOKEN_JJ"]
     else:
         RDM_API_URL = "https://researchdata.tuwien.ac.at/api"
         ELAUTE_COMMUNITY_ID = get_id_from_api(
             f"{RDM_API_URL}/communities/e-laute"
         )
-        if GA_MODE:
-            print(" 🚀 Running in GitHubActions PRODUCTION mode")
-            RDM_API_TOKEN = os.environ["RDM_API_TOKEN_JJ"]
+        print(" 🚀 Running in GitHubActions PRODUCTION mode")
+        RDM_API_TOKEN = os.environ["RDM_API_TOKEN_JJ"]
 
-        else:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-            print("🚀 Running in local PRODUCTION mode")
-            RDM_API_TOKEN = os.getenv("RDM_API_TOKEN")
-
-    if GA_MODE:
-        # this is equal to the home dir in the sources repository (so where the files that should be uploaded are located)
-        FILES_PATH = "./caller-repo/"  # TODO: with or without Path??
-        # FILES_PATH = Path("./caller-repo/")
-    else:
-        FILES_PATH = "scripts/upload_to_RDM/files/"
+    # Use the repo root when called from GitHub Actions; fallback to home.
+    FILES_PATH = os.environ.get("GITHUB_WORKSPACE", os.path.expanduser("~"))
 
     return (
         RDM_API_URL,
@@ -159,7 +138,7 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
     """
     Fetch records from the RDM API.
     """
-    h, fh = set_headers(RDM_API_TOKEN)
+    h, _fh = set_headers(RDM_API_TOKEN)
     response = requests.get(
         f"{RDM_API_URL}/communities/{ELAUTE_COMMUNITY_ID}/records",
         headers=h,

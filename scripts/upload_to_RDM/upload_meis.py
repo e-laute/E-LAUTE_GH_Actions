@@ -18,7 +18,10 @@ from . import rdm_upload_utils
     RDM_API_TOKEN,
     FILES_PATH,
     ELAUTE_COMMUNITY_ID,
-) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True, GA_MODE=False)
+) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True)
+
+print(FILES_PATH)
+sys.exit(0)
 
 
 errors = []

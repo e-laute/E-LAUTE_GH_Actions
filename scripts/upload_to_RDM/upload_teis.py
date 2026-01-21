@@ -17,7 +17,7 @@ from . import rdm_upload_utils
     RDM_API_TOKEN,
     FILES_PATH,
     ELAUTE_COMMUNITY_ID,
-) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True, GA_MODE=False)
+) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True)
 
 # TODO: remove this and change the logic so that all files from the FILE_PATH are taken
 sources_table = pd.read_csv(
