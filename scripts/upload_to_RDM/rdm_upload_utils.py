@@ -37,7 +37,7 @@ def setup_for_rdm_api_access(TESTING_MODE=True):
             f"{RDM_API_URL}/communities/e-laute-test"
         )
         print("🧪 Running in GitHubActions TESTING mode")
-        RDM_API_TOKEN = os.environ["RDM_API_TEST_TOKEN_JJ"]
+        RDM_API_TOKEN = os.environ["RDM_TEST_API_TOKEN_JJ"]
     else:
         RDM_API_URL = "https://researchdata.tuwien.ac.at/api"
         ELAUTE_COMMUNITY_ID = get_id_from_api(
