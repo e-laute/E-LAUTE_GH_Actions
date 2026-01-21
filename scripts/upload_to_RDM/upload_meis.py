@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 
 
-from . import rdm_upload_utils
+from upload_to_RDM import rdm_upload_utils
 
 RDM_API_URL = None
 RDM_API_TOKEN = None
