@@ -8,7 +8,7 @@ import json
 # TODO: where and how to fetch the files from?
 # - gitlab repo? (then I need credentials from there as well, I think)
 
-from . import rdm_upload_utils
+from upload_to_RDM import rdm_upload_utils
 
 RDM_API_URL = None
 RDM_API_TOKEN = None

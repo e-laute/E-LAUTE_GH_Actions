@@ -40,8 +40,7 @@ jobs:
       - name: Run upload_mei.py script to upload all mei-files in the repository
         run: |
           export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
-          cd shared-actions/scripts/
+          cd shared-actions
           python -m pip install --upgrade pip
           pip install requests lxml pandas dotenv
-          python -m upload_to_RDM.upload_meis --testing --draft-one
-        # python -m scripts/upload_to_RDM.upload_meis
+          python -m scripts.upload_to_RDM.upload_meis --testing --draft-one
