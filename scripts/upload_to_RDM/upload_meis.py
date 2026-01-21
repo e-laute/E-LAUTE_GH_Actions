@@ -55,25 +55,7 @@ def get_metadata_df_from_mei(mei_file_path):
         if identifier_elem is not None:
             metadata["work_id"] = identifier_elem.text.strip()
         else:
-            # Fallback - extract from composer field if it contains folio info
-            composer_elem = doc.find(".//mei:composer", ns)
-            if composer_elem is not None and composer_elem.text:
-                # Extract work ID from composer text like "Judenkünig 1523: fol. 28r-28v"
-                composer_text = composer_elem.text.strip()
-                if "fol." in composer_text:
-                    # Create work ID from composer info
-                    parts = composer_text.split(":")
-                    if len(parts) >= 2:
-                        folio_part = (
-                            parts[1]
-                            .strip()
-                            .replace("fol. ", "")
-                            .replace(" ", "")
-                        )
-                        metadata["work_id"] = f"Jud_1523-2_{folio_part}"
-                        metadata["fol_or_p"] = (
-                            parts[1].strip().replace("fol. ", "")
-                        )
+            errors.append(f"No work ID found in MEI file {mei_file_path}")
 
         # Extract titles - try multiple locations
         main_title = doc.find('.//mei:title[@type="main"]', ns)
@@ -108,15 +90,9 @@ def get_metadata_df_from_mei(mei_file_path):
             if biblscope is not None:
                 metadata["fol_or_p"] = biblscope.text.strip()
 
-        # Extract source ID from composer field if available
+        # Extract source ID
         if "source_id" not in metadata:
-            composer_elem = doc.find(".//mei:composer", ns)
-            if composer_elem is not None and composer_elem.text:
-                composer_text = composer_elem.text.strip()
-                if "Judenkünig" in composer_text and "1523" in composer_text:
-                    metadata["source_id"] = (
-                        "A-Wn MS47356-8°"  # Default for Judenkünig 1523
-                    )
+            errors.append(f"No source ID found in MEI file {mei_file_path}")
 
         # Extract work ID from monograph identifier
         work_id = doc.find(".//mei:analytic/mei:identifier", ns)
