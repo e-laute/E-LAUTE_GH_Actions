@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-import sys
 from lxml import etree
 
 import requests
@@ -12,16 +11,10 @@ from datetime import datetime
 
 from . import rdm_upload_utils
 
-
-(
-    RDM_API_URL,
-    RDM_API_TOKEN,
-    FILES_PATH,
-    ELAUTE_COMMUNITY_ID,
-) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True)
-
-print(FILES_PATH)
-sys.exit(0)
+RDM_API_URL = None
+RDM_API_TOKEN = None
+FILES_PATH = None
+ELAUTE_COMMUNITY_ID = None
 
 
 errors = []
@@ -859,8 +852,18 @@ def main():
     """
 
     # TODO: add check for work_ids and RDM_record_ids via RDM_API and check if update or create
+    testing_mode, draft_one = rdm_upload_utils.parse_rdm_cli_args(
+        description="Upload MEI files to RDM (testing or production).",
+        draft_one_help="Process only a single work_id.",
+    )
 
-    draft_one = len(sys.argv) > 1 and "--draft-one" in sys.argv
+    global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID
+    (
+        RDM_API_URL,
+        RDM_API_TOKEN,
+        FILES_PATH,
+        ELAUTE_COMMUNITY_ID,
+    ) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=testing_mode)
 
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 

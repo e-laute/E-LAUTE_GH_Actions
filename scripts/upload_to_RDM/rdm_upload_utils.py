@@ -2,6 +2,7 @@ import requests
 import os
 import json
 import hashlib
+import argparse
 
 import pandas as pd
 
@@ -55,6 +56,33 @@ def setup_for_rdm_api_access(TESTING_MODE=True):
         FILES_PATH,
         ELAUTE_COMMUNITY_ID,
     )
+
+
+def parse_rdm_cli_args(description, draft_one_help):
+    parser = argparse.ArgumentParser(description=description)
+    env_group = parser.add_mutually_exclusive_group()
+    env_group.add_argument(
+        "--testing",
+        action="store_true",
+        help="Use the testing RDM instance (default).",
+    )
+    env_group.add_argument(
+        "--production",
+        action="store_true",
+        help="Use the production RDM instance.",
+    )
+    parser.add_argument(
+        "--draft-one",
+        action="store_true",
+        help=draft_one_help,
+    )
+    args = parser.parse_args()
+
+    testing_mode = not args.production
+    if args.testing:
+        testing_mode = True
+
+    return testing_mode, args.draft_one
 
 
 # Utility: make HTML link

@@ -2,7 +2,6 @@ from datetime import datetime
 import requests
 import pandas as pd
 import os
-import sys
 from lxml import etree
 import json
 
@@ -11,13 +10,10 @@ import json
 
 from . import rdm_upload_utils
 
-
-(
-    RDM_API_URL,
-    RDM_API_TOKEN,
-    FILES_PATH,
-    ELAUTE_COMMUNITY_ID,
-) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=True)
+RDM_API_URL = None
+RDM_API_TOKEN = None
+FILES_PATH = None
+ELAUTE_COMMUNITY_ID = None
 
 # TODO: remove this and change the logic so that all files from the FILE_PATH are taken
 sources_table = pd.read_csv(
@@ -38,7 +34,7 @@ merged = sources_table.merge(
 sources_table = (
     merged.drop(columns=["ID"]) if "ID" in merged.columns else merged
 )
-sources_table["file_path"] = FILES_PATH + sources_table["file_name"]
+sources_table["file_path"] = None
 
 
 def extract_title_versions(title_elem, ns):
@@ -660,7 +656,7 @@ def process_elaute_ids_for_update_or_create():
     return list(new_source_ids), list(existing_source_ids_to_check)
 
 
-def upload_tei_files():
+def upload_tei_files(draft_one=False):
     """
     Process and upload TEI files to TU RDM, one record per source_id/file_path.
     """
@@ -672,9 +668,6 @@ def upload_tei_files():
     if not sources:
         print("No sources found.")
         return
-
-    # Check if we should only process one source (for testing)
-    draft_one = len(sys.argv) > 1 and "--draft-one" in sys.argv
 
     if draft_one:
         sources = sources[:1]
@@ -836,12 +829,27 @@ def main():
     """
     Consolidated main: for each source_id, update if exists, else upload.
     """
-    draft_one = len(sys.argv) > 1 and "--draft-one" in sys.argv
+    testing_mode, draft_one = rdm_upload_utils.parse_rdm_cli_args(
+        description="Upload TEI files to RDM (testing or production).",
+        draft_one_help="Process only a single source_id.",
+    )
+
+    global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID
+    (
+        RDM_API_URL,
+        RDM_API_TOKEN,
+        FILES_PATH,
+        ELAUTE_COMMUNITY_ID,
+    ) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=testing_mode)
+
+    sources_table["file_path"] = sources_table["file_name"].apply(
+        lambda name: os.path.join(FILES_PATH, name)
+    )
 
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 
     if len(new_work_ids) > 0:
-        upload_tei_files(new_work_ids, draft_one)
+        upload_tei_files(draft_one)
 
     if len(existing_work_ids) > 0:
         update_records_in_RDM(existing_work_ids, draft_one)
