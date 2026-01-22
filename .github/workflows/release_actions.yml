@@ -42,5 +42,5 @@ jobs:
           export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
           cd shared-actions
           python -m pip install --upgrade pip
-          pip install -r shared-actions/scripts/requirements-release.txt
+          pip install -r scripts/requirements-release.txt
           PYTHONPATH="scripts" python -m upload_to_RDM.upload_meis --testing
