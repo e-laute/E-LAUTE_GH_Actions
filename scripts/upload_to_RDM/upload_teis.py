@@ -511,7 +511,7 @@ def get_metadata_for_source(source_id, file_path):
     return metadata_df, people_df, corporate_df
 
 
-def update_records_in_RDM(source_ids_to_update, draft_one=False):
+def update_records_in_RDM(source_ids_to_update):
     """Update existing records in RDM if metadata has changed. Only report files that did not reach and pass submit-review."""
 
     h, fh = set_headers(RDM_API_TOKEN)
@@ -608,7 +608,6 @@ def update_records_in_RDM(source_ids_to_update, draft_one=False):
                 file_paths=[file_path],
                 RDM_API_TOKEN=RDM_API_TOKEN,
                 record_id=new_record_id,
-                draft_one=draft_one,
             )
             failed_uploads.extend(fails)
 
@@ -658,7 +657,7 @@ def process_elaute_ids_for_update_or_create():
     return list(new_source_ids), list(existing_source_ids_to_check)
 
 
-def upload_tei_files(draft_one=False):
+def upload_tei_files():
     """
     Process and upload TEI files to TU RDM, one record per source_id/file_path.
     """
@@ -671,11 +670,6 @@ def upload_tei_files(draft_one=False):
         print("No sources found.")
         return
 
-    if draft_one:
-        sources = sources[:1]
-        print(
-            f"Testing upload process with one source_id (draft only): {sources[0]['source_id']}"
-        )
     # HTTP Headers
     h, fh = set_headers(RDM_API_TOKEN)
 
@@ -777,28 +771,26 @@ def upload_tei_files(draft_one=False):
                     "Warning: ELAUTE_COMMUNITY_ID not set, skipping community submission"
                 )
 
-            # Only submit review if not in draft_one mode
-            if not draft_one:
-                # create curation request
-                r = requests.post(
-                    api_url_curations,
-                    headers=h,
-                    data=json.dumps({"topic": {"record": record_id}}),
-                )
-                assert (
-                    r.status_code == 201
-                ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
+            # create curation request
+            r = requests.post(
+                api_url_curations,
+                headers=h,
+                data=json.dumps({"topic": {"record": record_id}}),
+            )
+            assert (
+                r.status_code == 201
+            ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
 
-                # Submit the review to start publication process in RDM (continue in RDM interface)
-                r = requests.post(
-                    f"{api_url}/{record_id}/draft/actions/submit-review",
-                    headers=h,
+            # Submit the review to start publication process in RDM (continue in RDM interface)
+            r = requests.post(
+                f"{api_url}/{record_id}/draft/actions/submit-review",
+                headers=h,
+            )
+            if not r.status_code == 202:
+                print(
+                    f"Failed to submit review for record {record_id} (code: {r.status_code})"
                 )
-                if not r.status_code == 202:
-                    print(
-                        f"Failed to submit review for record {record_id} (code: {r.status_code})"
-                    )
-                    failed_uploads.append(source_id)
+                failed_uploads.append(source_id)
 
         except AssertionError as e:
             print(f"Assertion error processing source_id {source_id}: {str(e)}")
@@ -831,9 +823,8 @@ def main():
     """
     Consolidated main: for each source_id, update if exists, else upload.
     """
-    testing_mode, draft_one = parse_rdm_cli_args(
-        description="Upload TEI files to RDM (testing or production).",
-        draft_one_help="Process only a single source_id.",
+    testing_mode = parse_rdm_cli_args(
+        description="Upload TEI files to RDM (testing or production)."
     )
 
     global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID
@@ -851,10 +842,10 @@ def main():
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 
     if len(new_work_ids) > 0:
-        upload_tei_files(draft_one)
+        upload_tei_files()
 
     if len(existing_work_ids) > 0:
-        update_records_in_RDM(existing_work_ids, draft_one)
+        update_records_in_RDM(existing_work_ids)
 
 
 if __name__ == "__main__":

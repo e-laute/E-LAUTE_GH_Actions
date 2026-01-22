@@ -58,7 +58,7 @@ def setup_for_rdm_api_access(TESTING_MODE=True):
     )
 
 
-def parse_rdm_cli_args(description, draft_one_help):
+def parse_rdm_cli_args(description):
     parser = argparse.ArgumentParser(description=description)
     env_group = parser.add_mutually_exclusive_group()
     env_group.add_argument(
@@ -71,18 +71,13 @@ def parse_rdm_cli_args(description, draft_one_help):
         action="store_true",
         help="Use the production RDM instance.",
     )
-    parser.add_argument(
-        "--draft-one",
-        action="store_true",
-        help=draft_one_help,
-    )
     args = parser.parse_args()
 
     testing_mode = not args.production
     if args.testing:
         testing_mode = True
 
-    return testing_mode, args.draft_one
+    return testing_mode
 
 
 # Utility: make HTML link
@@ -215,7 +210,6 @@ def upload_to_rdm(
     RDM_API_URL,
     ELAUTE_COMMUNITY_ID,
     record_id=None,
-    draft_one=False,
 ):
     new_upload = record_id is None
 
@@ -331,29 +325,35 @@ def upload_to_rdm(
     #             f"Failed to publish record {record_id} (code: {r.status_code})"
     #         )
 
-    # For production: create curation request and publish
-    # Only trigger curation and submit-review if not in --draft-one mode
-    if not draft_one:
-        if new_upload:
-            r = requests.post(
-                f"{RDM_API_URL}/curations",
-                headers=h,
-                data=json.dumps({"topic": {"record": record_id}}),
-            )
-            assert (
-                r.status_code == 201
-            ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
-
-        # Submit the review for the record draft
+    # For production: create curation request and submit-review
+    if new_upload:
         r = requests.post(
-            f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
+            f"{RDM_API_URL}/curations",
             headers=h,
+            data=json.dumps({"topic": {"record": record_id}}),
         )
-        if not r.status_code == 202:
-            print(
-                f"Failed to submit review for record {record_id} (code: {r.status_code})"
-            )
-            failed_uploads.append(elaute_id)
+        assert (
+            r.status_code == 201
+        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
+
+    # Submit the review for the record draft
+    r = requests.post(
+        f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
+        headers=h,
+    )
+    if not r.status_code == 202:
+        print(
+            f"Failed to submit review for record {record_id} (code: {r.status_code})"
+        )
+        failed_uploads.append(elaute_id)
+
+    r = requests.post(
+        f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+        headers=h,
+    )
+    if r.status_code != 202:
+        print(f"Failed to publish record {record_id} (code: {r.status_code})")
+        failed_uploads.append(elaute_id)
 
     return failed_uploads
 

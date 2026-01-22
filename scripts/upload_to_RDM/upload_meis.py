@@ -588,7 +588,7 @@ def fill_out_basic_metadata_for_work(
     return metadata
 
 
-def update_records_in_RDM(work_ids_to_update, draft_one=False):
+def update_records_in_RDM(work_ids_to_update):
     """Update existing records in RDM if metadata has changed."""
 
     # HTTP Headers
@@ -692,7 +692,6 @@ def update_records_in_RDM(work_ids_to_update, draft_one=False):
                 RDM_API_URL=RDM_API_URL,
                 ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
                 record_id=new_record_id,
-                draft_one=draft_one,
             )
             failed_updates.extend(fails)
 
@@ -748,7 +747,7 @@ def process_elaute_ids_for_update_or_create():
     return list(new_work_ids), list(existing_work_ids_to_check)
 
 
-def upload_mei_files(work_ids, draft_one=False):
+def upload_mei_files(work_ids):
     """
     Process and upload MEI files to TU RDM grouped by work_id.
     Each work_id becomes one record with multiple files.
@@ -758,15 +757,6 @@ def upload_mei_files(work_ids, draft_one=False):
     if not work_ids:
         print("No work_ids found.")
         return
-
-    # Check if we should only process one work_id (for testing)
-
-    # If --draft-one is set, always process only one work_id
-    if draft_one:
-        work_ids = work_ids[:1]
-        print(
-            f"Testing upload with only one work_id (draft mode): {work_ids[0]}"
-        )
 
     # HTTP Headers
     h, fh = set_headers(RDM_API_TOKEN)
@@ -805,7 +795,6 @@ def upload_mei_files(work_ids, draft_one=False):
                 RDM_API_TOKEN=RDM_API_TOKEN,
                 RDM_API_URL=RDM_API_URL,
                 ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
-                draft_one=draft_one,
             )
             failed_uploads.extend(fails)
 
@@ -833,9 +822,8 @@ def main():
     """
 
     # TODO: add check for work_ids and RDM_record_ids via RDM_API and check if update or create
-    testing_mode, draft_one = parse_rdm_cli_args(
-        description="Upload MEI files to RDM (testing or production).",
-        draft_one_help="Process only a single work_id.",
+    testing_mode = parse_rdm_cli_args(
+        description="Upload MEI files to RDM (testing or production)."
     )
 
     global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID
@@ -849,10 +837,10 @@ def main():
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 
     if len(new_work_ids) > 0:
-        upload_mei_files(new_work_ids, draft_one)
+        upload_mei_files(new_work_ids)
 
     if len(existing_work_ids) > 0:
-        update_records_in_RDM(existing_work_ids, draft_one)
+        update_records_in_RDM(existing_work_ids)
 
 
 if __name__ == "__main__":
