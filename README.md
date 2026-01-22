@@ -3,5 +3,4 @@ Stores all Github Actions for E-Laute, will be accessed through Actions in each 
 
 
 TODOs:
-- configure same linter and formatter settings for all users
 - clean up utils.py
