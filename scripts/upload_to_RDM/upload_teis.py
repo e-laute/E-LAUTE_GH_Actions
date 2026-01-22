@@ -8,7 +8,17 @@ import json
 # TODO: where and how to fetch the files from?
 # - gitlab repo? (then I need credentials from there as well, I think)
 
-from upload_to_RDM import rdm_upload_utils
+from upload_to_RDM.rdm_upload_utils import (
+    get_records_from_RDM,
+    set_headers,
+    parse_rdm_cli_args,
+    setup_for_rdm_api_access,
+    look_up_source_links,
+    make_html_link,
+    create_related_identifiers,
+    compare_hashed_files,
+    upload_to_rdm,
+)
 
 RDM_API_URL = None
 RDM_API_TOKEN = None
@@ -265,20 +275,16 @@ def get_metadata_df_from_tei(tei_file_path):
 
 
 def create_description(row):
-    links = rdm_upload_utils.look_up_source_links(
-        sources_table, row["source_id"]
-    )
+    links = look_up_source_links(sources_table, row["source_id"])
     valid_links = [
         link
         for link in links
         if link is not None and link == link and str(link).strip() != ""
     ]
-    links_stringified = ", ".join(
-        rdm_upload_utils.make_html_link(link) for link in valid_links
-    )
+    links_stringified = ", ".join(make_html_link(link) for link in valid_links)
 
     source_id = row["source_id"]
-    platform_link = rdm_upload_utils.make_html_link(
+    platform_link = make_html_link(
         f"https://edition.onb.ac.at/fedora/objects/o:lau.{source_id}/methods/sdef:TEI/get"
     )
 
@@ -289,14 +295,14 @@ def create_description(row):
     else:
         add_titles = f'"{title}"'
 
-    part1 = f" <h1>Transcription in TEI of a source from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains the transcription of the source {add_titles}, a 16th century lute tablature source, created as part of the E-LAUTE project ({rdm_upload_utils.make_html_link('https://e-laute.info/')}). The transcription preserves and makes historical lute music and instructions from the German-speaking regions during 1450-1550 accessible.</p><p>The transcription is based on the work with the title \"{row['title']}\" and the id \"{row['source_id']}\" in the e-lautedb.</p>"
+    part1 = f" <h1>Transcription in TEI of a source from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains the transcription of the source {add_titles}, a 16th century lute tablature source, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcription preserves and makes historical lute music and instructions from the German-speaking regions during 1450-1550 accessible.</p><p>The transcription is based on the work with the title \"{row['title']}\" and the id \"{row['source_id']}\" in the e-lautedb.</p>"
 
     part4 = f"<p>Images of the original source and renderings of the transcriptions can be found on the E-LAUTE platform: {platform_link}.</p>"
 
     if links_stringified not in [None, ""]:
         part2 = f"<p>Links to the source in other libraries: {links_stringified}.</p>"
 
-    part3 = f'<h2>Dataset Contents</h2><p>This dataset consists of one tei-file that contains the transcription of the original source.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {rdm_upload_utils.make_html_link("https://e-laute.info/")}</p>'
+    part3 = f'<h2>Dataset Contents</h2><p>This dataset consists of one tei-file that contains the transcription of the original source.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link("https://e-laute.info/")}</p>'
 
     return part1 + part4 + part2 + part3
 
@@ -482,9 +488,7 @@ def fill_out_basic_metadata(metadata_row, people_df, corporate_df):
             metadata["metadata"]["contributors"].append(person_entry)
 
     # Add source links as related identifiers
-    links_to_source = rdm_upload_utils.look_up_source_links(
-        sources_table, row["source_id"]
-    )
+    links_to_source = look_up_source_links(sources_table, row["source_id"])
     # Filter out empty, None, or NaN links
     links_to_source = [
         link
@@ -493,7 +497,7 @@ def fill_out_basic_metadata(metadata_row, people_df, corporate_df):
     ]
     if links_to_source:
         metadata["metadata"]["related_identifiers"].extend(
-            rdm_upload_utils.create_related_identifiers(links_to_source)
+            create_related_identifiers(links_to_source)
         )
 
     return metadata
@@ -510,9 +514,9 @@ def get_metadata_for_source(source_id, file_path):
 def update_records_in_RDM(source_ids_to_update, draft_one=False):
     """Update existing records in RDM if metadata has changed. Only report files that did not reach and pass submit-review."""
 
-    h, fh = rdm_upload_utils.set_headers(RDM_API_TOKEN)
+    h, fh = set_headers(RDM_API_TOKEN)
 
-    existing_records = rdm_upload_utils.get_records_from_RDM(
+    existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
 
@@ -584,9 +588,7 @@ def update_records_in_RDM(source_ids_to_update, draft_one=False):
                 current_value = current_metadata.get(field)
                 new_value = new_metadata.get(field)
 
-                if not rdm_upload_utils.compare_hashed_files(
-                    current_value, new_value
-                ):
+                if not compare_hashed_files(current_value, new_value):
                     metadata_changed = True
                     changes_detected.append(field)
 
@@ -600,7 +602,7 @@ def update_records_in_RDM(source_ids_to_update, draft_one=False):
             new_version_data = r.json()
             new_record_id = new_version_data["id"]
 
-            fails = rdm_upload_utils.upload_to_rdm(
+            fails = upload_to_rdm(
                 metadata=new_metadata_structure,
                 elaute_id=source_id,
                 file_paths=[file_path],
@@ -641,7 +643,7 @@ def process_elaute_ids_for_update_or_create():
         print("No source ids found.")
         return [], []
 
-    existing_records = rdm_upload_utils.get_records_from_RDM(
+    existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
 
@@ -675,7 +677,7 @@ def upload_tei_files(draft_one=False):
             f"Testing upload process with one source_id (draft only): {sources[0]['source_id']}"
         )
     # HTTP Headers
-    h, fh = rdm_upload_utils.set_headers(RDM_API_TOKEN)
+    h, fh = set_headers(RDM_API_TOKEN)
 
     api_url = f"{RDM_API_URL}/records"
     api_url_curations = f"{RDM_API_URL}/curations"
@@ -829,7 +831,7 @@ def main():
     """
     Consolidated main: for each source_id, update if exists, else upload.
     """
-    testing_mode, draft_one = rdm_upload_utils.parse_rdm_cli_args(
+    testing_mode, draft_one = parse_rdm_cli_args(
         description="Upload TEI files to RDM (testing or production).",
         draft_one_help="Process only a single source_id.",
     )
@@ -840,7 +842,7 @@ def main():
         RDM_API_TOKEN,
         FILES_PATH,
         ELAUTE_COMMUNITY_ID,
-    ) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=testing_mode)
+    ) = setup_for_rdm_api_access(TESTING_MODE=testing_mode)
 
     sources_table["file_path"] = sources_table["file_name"].apply(
         lambda name: os.path.join(FILES_PATH, name)

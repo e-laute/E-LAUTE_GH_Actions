@@ -9,7 +9,18 @@ import re
 from datetime import datetime
 
 
-from upload_to_RDM import rdm_upload_utils
+from upload_to_RDM.rdm_upload_utils import (
+    get_records_from_RDM,
+    set_headers,
+    parse_rdm_cli_args,
+    setup_for_rdm_api_access,
+    look_up_source_links,
+    look_up_source_title,
+    make_html_link,
+    create_related_identifiers,
+    compare_hashed_files,
+    upload_to_rdm,
+)
 
 RDM_API_URL = None
 RDM_API_TOKEN = None
@@ -392,19 +403,17 @@ def create_description_for_work(row, file_count):
     Create description for a work with multiple files.
     """
     links_stringified = ""
-    links = rdm_upload_utils.look_up_source_links(
-        sources_table, row["source_id"]
-    )
+    links = look_up_source_links(sources_table, row["source_id"])
     for link in links if links else []:
-        links_stringified += rdm_upload_utils.make_html_link(link) + ", "
+        links_stringified += make_html_link(link) + ", "
 
     source_id = row["source_id"]
     work_number = row["work_id"].split("_")[-1]
-    platform_link = rdm_upload_utils.make_html_link(
+    platform_link = make_html_link(
         f"https://edition.onb.ac.at/fedora/objects/o:lau.{source_id}/methods/sdef:TEI/get?mode={work_number}"
     )
 
-    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th century lute music piece originally notated in lute tablature, created as part of the E-LAUTE project ({rdm_upload_utils.make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{rdm_upload_utils.look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
+    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th century lute music piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
 
     part4 = f"<p>Images of the original source and renderings of the transcriptions can be found on the E-LAUTE platform: {platform_link}.</p>"
 
@@ -413,7 +422,7 @@ def create_description_for_work(row, file_count):
     else:
         part2 = ""
 
-    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation).</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {rdm_upload_utils.make_html_link('https://e-laute.info/')}</p>'
+    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation).</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
 
     return part1 + part4 + part2 + part3
 
@@ -570,12 +579,10 @@ def fill_out_basic_metadata_for_work(
                 contributor_names.add(person_role_key)
 
     # Add source links as related identifiers
-    links_to_source = rdm_upload_utils.look_up_source_links(
-        sources_table, row["source_id"]
-    )
+    links_to_source = look_up_source_links(sources_table, row["source_id"])
     if links_to_source:
         metadata["metadata"]["related_identifiers"].extend(
-            rdm_upload_utils.create_related_identifiers(links_to_source)
+            create_related_identifiers(links_to_source)
         )
 
     return metadata
@@ -585,10 +592,10 @@ def update_records_in_RDM(work_ids_to_update, draft_one=False):
     """Update existing records in RDM if metadata has changed."""
 
     # HTTP Headers
-    h, fh = rdm_upload_utils.set_headers(RDM_API_TOKEN)
+    h, fh = set_headers(RDM_API_TOKEN)
 
     # Load existing work_id to record_id mapping
-    existing_records = rdm_upload_utils.get_records_from_RDM(
+    existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
 
@@ -662,9 +669,7 @@ def update_records_in_RDM(work_ids_to_update, draft_one=False):
                 current_value = current_metadata.get(field)
                 new_value = new_metadata.get(field)
 
-                if not rdm_upload_utils.compare_hashed_files(
-                    current_value, new_value
-                ):
+                if not compare_hashed_files(current_value, new_value):
                     metadata_changed = True
                     changes_detected.append(field)
 
@@ -679,7 +684,7 @@ def update_records_in_RDM(work_ids_to_update, draft_one=False):
             new_version_data = r.json()
             new_record_id = new_version_data["id"]
 
-            fails = rdm_upload_utils.upload_to_rdm(
+            fails = upload_to_rdm(
                 metadata=new_metadata_structure,
                 elaute_id=work_id,
                 file_paths=file_paths,
@@ -728,7 +733,7 @@ def process_elaute_ids_for_update_or_create():
         print("No work_ids found.")
         return [], []
 
-    existing_records = rdm_upload_utils.get_records_from_RDM(
+    existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
     existing_work_ids = set(existing_records["elaute_id"].tolist())
@@ -764,7 +769,7 @@ def upload_mei_files(work_ids, draft_one=False):
         )
 
     # HTTP Headers
-    h, fh = rdm_upload_utils.set_headers(RDM_API_TOKEN)
+    h, fh = set_headers(RDM_API_TOKEN)
 
     for work_id in work_ids:
         print(f"\n--- Processing work_id: {work_id} ---")
@@ -793,7 +798,7 @@ def upload_mei_files(work_ids, draft_one=False):
 
             # ---- UPLOAD ---
 
-            fails = rdm_upload_utils.upload_v2(
+            fails = upload_to_rdm(
                 metadata=metadata,
                 elaute_id=work_id,
                 file_paths=file_paths,
@@ -828,7 +833,7 @@ def main():
     """
 
     # TODO: add check for work_ids and RDM_record_ids via RDM_API and check if update or create
-    testing_mode, draft_one = rdm_upload_utils.parse_rdm_cli_args(
+    testing_mode, draft_one = parse_rdm_cli_args(
         description="Upload MEI files to RDM (testing or production).",
         draft_one_help="Process only a single work_id.",
     )
@@ -839,7 +844,7 @@ def main():
         RDM_API_TOKEN,
         FILES_PATH,
         ELAUTE_COMMUNITY_ID,
-    ) = rdm_upload_utils.setup_for_rdm_api_access(TESTING_MODE=testing_mode)
+    ) = setup_for_rdm_api_access(TESTING_MODE=testing_mode)
 
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 
