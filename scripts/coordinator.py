@@ -7,15 +7,23 @@ import re
 import copy
 import sys
 from pathlib import Path
+import argparse
 import importlib
 import json
 from lxml import etree
 
 #initializing
+parser =argparse.ArgumentParser(description="Coordinates the execution of scripts in the workpatch on filepath")
+include = parser.add_mutually_exclusive_group(required=True)
+include.add_argument("-i","--include",nargs="*", help="Included files by id number")
+include.add_argument("-f","--filepath",help="A specific filepath")
+parser.add_argument("-w","--workpatch",required=True, help="The workpatch to be executed")
+parser.add_argument("-a","--addargs",nargs="*", help="Additional arguments required by the workpatch, formatted key=value")
+
 with open("workpatches.json") as f:
     workpatches_dic = json.load(f)
 
-def execute_workpatch(filepath:str, workpatch:dict, *addargs): #TODO **addargs, main needs better argument handling
+def execute_workpatch(filepath:str, workpatch:dict, addargs:dict):
     """
     Parses filepath, loads the specefied workpatch from workpath 
     and calls the designated scripts on the parsed file.
@@ -60,44 +68,57 @@ def execute_workpatch(filepath:str, workpatch:dict, *addargs): #TODO **addargs, 
 def getsibling(filepath):
     pass
 
-def main(argv: list[str]):
+def main():
     """
-    Handles arguments passed from yaml
-    
-    :param argv: arguments passed from yaml
-    :type argv: list[str]
+    Parses Arguments, selects file, calls coordinator on files with workpatch 
     """
     #TODO needs to be rewritten to fit new design
     #TODO needs to handle arguments passed, maybe argparse? 
     #For now assumes python coordinator.py filepath workpatch additional arguments
     #TODO needs to be able to handle multiple files
     #TODO check for validity of workpatch x filetype, multiple files
-    if len(argv) != 2 or argv[0] in {"-h", "--help"}:
-        print(__doc__.strip())
-        print("Received inputs:", argv)
-        return 1
-    # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-    mei_path = Path('caller-repo') / Path(argv[1])
-    print(f"Checking file: {mei_path}")
-    
-    if not mei_path.is_file():
-        print(f"::error::File not found: '{mei_path}'")
-        return 2
+    args = parser.parse_args()
     
 
     try:
-        workpatch = workpatches_dic[argv[2]] #argv needs to contain workpatch
+        workpatch = workpatches_dic[args.workpatch] #argv needs to contain workpatch
     except KeyError:
-        print(f"::error::Unknown workpatch: {argv[2]}")
+        print(f"::error::Unknown workpatch: {args.workpatch}")
         return 1
+
     
-    try:
-        execute_workpatch(mei_path,workpatch,argv[3:])
-        print("::notice::Process completed successfully")
-        return 0
-    except Exception as e:
-        print(f"::error::Failed to process file: {e}")
-        return 1
+    files = []
+    if args.filepath:
+        files.append(args.file)
+    else:
+        files = get_file_from_num(args.include)
+    
+    for filepath in files:
+        # hardcode 'caller-repo/' prefix to refer to caller (source) repository
+        mei_path = Path('caller-repo') / Path(filepath)
+        print(f"Checking file: {mei_path}")
+        if not mei_path.is_file():
+            print(f"::error::File not found: '{mei_path}'")
+            return 2
+        
+        try:
+            execute_workpatch(mei_path,workpatch,addargs_to_dic(args.addargs))
+            print("::notice::Process completed successfully")
+            return 0
+        except Exception as e:
+            print(f"::error::Failed to process file: {e}")
+            return 1
+    
+def get_file_from_num(*args):
+    pass
+
+def addargs_to_dic(addargs:list):
+    kwargs = {}
+    for item in addargs:
+        if '=' in item:
+            key, value = item.split('=', 1) # Split only on the first '='
+            kwargs[key] = value
+    return kwargs
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv)) 
+    sys.exit(main()) 
