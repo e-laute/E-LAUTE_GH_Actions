@@ -2,13 +2,9 @@ name: Upload MEI files to TU-RDM
 
 on:
   workflow_call:
-    # secrets:
-    #     RDM_TEST_API_TOKEN_JJ:
-    #         required: false
     secrets:
       RDM_TEST_API_TOKEN_JJ:
         required: true
-
 
 jobs:
   run-shared-script:
@@ -34,13 +30,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "shared-actions/scripts/requirements-release.txt"
 
       # 4. Install python requirements and run the shared script *on the caller repo*
-      - name: Run upload_mei.py script to upload all mei-files in the repository
+      - name: Run upload_mei.py script
         run: |
           export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
-          cd shared-actions
           python -m pip install --upgrade pip
-          pip install -r scripts/requirements-release.txt
-          PYTHONPATH="scripts" python -m upload_to_RDM.upload_meis --testing
+          pip install -r shared-actions/scripts/requirements-release.txt
+          PYTHONPATH="shared-actions/scripts" python -m upload_to_RDM.upload_meis --testing

@@ -1,4 +1,4 @@
-name: Parse and upload provenance data 
+name: Parse and upload provenance data
 
 on:
   workflow_call:
@@ -42,21 +42,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "shared-actions/scripts/requirements-release.txt"
 
       # 4. Install dependencies
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests lxml
+          pip install -r shared-actions/scripts/requirements-release.txt
 
       # 5. Run the shared script *on the caller repo*
       - name: Run shared Python script
-        env: 
+        env:
           GRAPHDB_URL: "${{ secrets.GRAPHDB_URL }}"
           GRAPHDB_REPOSITORY: "${{ secrets.GRAPHDB_REPOSITORY }}"
           GRAPHDB_USERNAME: "${{ secrets.GRAPHDB_USERNAME }}"
           GRAPHDB_PASSWORD: "${{ secrets.GRAPHDB_PASSWORD }}"
           INPUT_PATH: "${{ github.workspace }}/caller-repo"
-        run: | 
+        run: |
           python shared-actions/scripts/upload_to_graphdb.py
