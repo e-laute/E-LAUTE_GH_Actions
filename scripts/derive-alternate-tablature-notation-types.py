@@ -1,3 +1,27 @@
+"""
+Derive alternate tablature notation types from GLT.mei files.
+
+
+Usage:
+python scripts/derive-alternate-tablature-notation-types.py <folder>
+
+where <folder> is a relative or absolute path to process.
+
+The script will:
+1. Process the GLT.mei files in the given folder and subfolders.
+2. Create FLT and ILT files from the GLT.mei files.
+
+
+TODO: ensure that this works with GitHub-Actions workflow (file retrieval, etc.)
+
+
+TODO: push files to a repository that the ÖNB has access to
+TODO: save (all?) files to a folder to be accessed when uploading to RDM
+
+
+
+"""
+
 import argparse
 import os
 import random
