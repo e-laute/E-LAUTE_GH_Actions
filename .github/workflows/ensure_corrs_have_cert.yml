@@ -1,4 +1,4 @@
-name: Parse and upload provenance data 
+name: Parse and upload provenance data
 
 on:
   workflow_call:
@@ -37,7 +37,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "shared-actions/scripts/requirements-dispatch.txt"
 
       # 4. Install dependencies
       - name: Install Python dependencies
@@ -54,5 +56,5 @@ jobs:
       - name: commit changes
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: ${{ inputs.commit_message }} 
+          commit_message: ${{ inputs.commit_message }}
           repository: caller-repo
