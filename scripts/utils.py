@@ -1,18 +1,15 @@
-import os
-import re
 from lxml import etree
-import copy
-import sys
-import math
 from datetime import date
 
 
-ns = {"mei":"http://www.music-encoding.org/ns/mei",
-        "xml":"http://www.w3.org/XML/1998/namespace"}
+ns = {
+    "mei": "http://www.music-encoding.org/ns/mei",
+    "xml": "http://www.w3.org/XML/1998/namespace",
+}
 
-    
 
-def edit_appInfo(root:etree.Element,p_description:str):
+# TODO: move function from derive-alternate-tablature-notation-types.py here?
+def edit_appInfo(root: etree.Element, p_description: str):
     """Adds `<p>` containing p_description to `<application>` with `<name>` GitHub action Script under `<appInfo>`.
 
     Args:
@@ -26,27 +23,36 @@ def edit_appInfo(root:etree.Element,p_description:str):
       Error-type: Any potential Errors.
     """
 
-    applications = root.xpath(".//mei:application/mei:name[normalize-space(.)='GitHub Action Scripts']/..", namespaces=ns)
+    applications = root.xpath(
+        ".//mei:application/mei:name[normalize-space(.)='GitHub Action Scripts']/..",
+        namespaces=ns,
+    )
 
     if not applications:
         app_Info = root.find(".//mei:appInfo", namespaces=ns)
-        application = etree.SubElement(app_Info, "application", {"isodate":date.today().isoformat()})
-        name = etree.SubElement(application,"name")
-        name.text = "GitHub Action Scripts"    
+        application = etree.SubElement(
+            app_Info, "application", {"isodate": date.today().isoformat()}
+        )
+        name = etree.SubElement(application, "name")
+        name.text = "GitHub Action Scripts"
     else:
         application = applications[0]
-        if application.get("isodate") is not None and application.get("isodate") != date.today().isoformat():
-            application.set("startdate",application.get("isodate"))
+        if (
+            application.get("isodate") is not None
+            and application.get("isodate") != date.today().isoformat()
+        ):
+            application.set("startdate", application.get("isodate"))
             application.attrib.pop("isodate")
         if application.get("isodate") is None:
-            application.set("enddate",date.today().isoformat())
+            application.set("enddate", date.today().isoformat())
 
-    p = etree.SubElement(application,"p")
+    p = etree.SubElement(application, "p")
     p.text = p_description
-    
+
     return root
 
-def dur_length(elem:etree.Element,ignore=["sic","orig"]):
+
+def dur_length(elem: etree.Element, ignore=["sic", "orig"]):
     """Recursively adds up all `@dur` in subtree while accounting for `@dots`.
 
     Args:
@@ -60,13 +66,15 @@ def dur_length(elem:etree.Element,ignore=["sic","orig"]):
       Error-type: Any potential Errors.
     """
 
-    totaldur = 0.
+    totaldur = 0.0
     for child in elem:
         if etree.QName(child).localname in ignore:
             continue
         if "dur" in child.attrib:
             dur = float(child.attrib.get("dur"))
-            totaldur += 2/dur - 1/(dur*2**int(child.attrib.get("dots","0")))
+            totaldur += 2 / dur - 1 / (
+                dur * 2 ** int(child.attrib.get("dots", "0"))
+            )
         else:
-            totaldur+=dur_length(child)
+            totaldur += dur_length(child)
     return totaldur
