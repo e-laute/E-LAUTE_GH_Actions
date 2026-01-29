@@ -1,3 +1,16 @@
+"""
+Upload-script for the E-LAUTE MEI files to the TU-RDM platform.
+
+Usage (testing mode):
+cd scripts
+python -m upload_to_RDM.upload_meis --testing
+
+Usage (production mode):
+cd scripts
+python -m upload_to_RDM.upload_meis --production
+
+"""
+
 import pandas as pd
 import os
 from lxml import etree

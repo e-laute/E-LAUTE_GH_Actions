@@ -1,3 +1,7 @@
+"""
+Utility functions for uploading to the TU-RDM platform.
+"""
+
 import requests
 import os
 import json
