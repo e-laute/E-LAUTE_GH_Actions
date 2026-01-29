@@ -77,10 +77,10 @@ def ensure_application_info(
 
     # Add conversion information
     p_from = ET.SubElement(application, f"{ns}p")
-    p_from.text = f"converted from {input_filename}"
+    p_from.text = f"Input file: {input_filename}"
 
     p_to = ET.SubElement(application, f"{ns}p")
-    p_to.text = f"converted to {output_filename}"
+    p_to.text = f"Output file: {output_filename}"
 
 
 # Process MEI files to convert GLT to FLT and ILT
@@ -161,7 +161,7 @@ def process_mei_file(input_file, output_dir):
             os.path.basename(input_file),
             os.path.basename(output_french),
             VERSION,
-            "Derived through GLT-to-FLT-and-ILT-conversion-script",
+            os.path.basename(__file__),
         )
         inject_xml_model_declaration(tree, output_french)
 
@@ -175,7 +175,7 @@ def process_mei_file(input_file, output_dir):
             os.path.basename(input_file),
             os.path.basename(output_italian),
             VERSION,
-            "Derived through GLT-to-FLT-and-ILT-conversion-script",
+            os.path.basename(__file__),
         )
         inject_xml_model_declaration(tree, output_italian)
         return True
