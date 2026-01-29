@@ -9,6 +9,10 @@ Usage (production mode):
 cd scripts
 python -m upload_to_RDM.upload_meis --production
 
+# TODO: make sure that also the derived files are there and ready to be uploaded to RDM
+
+
+
 """
 
 import pandas as pd

@@ -1,5 +1,5 @@
 """
-Derive alternate tablature notation types from GLT.mei files.
+Derive alternate tablature notation types from currently GLT.mei files.
 
 
 Usage:
@@ -18,7 +18,7 @@ TODO: ensure that this works with GitHub-Actions workflow (file retrieval, etc.)
 TODO: push files to a repository that the ÖNB has access to
 TODO: save (all?) files to a folder to be accessed when uploading to RDM
 
-
+TODO: make this tablature type acnostic and make sure that it works depending on type of input tablature
 
 """
 
