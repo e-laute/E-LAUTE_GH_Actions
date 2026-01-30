@@ -1,0 +1,12 @@
+{"name":"add_sbs_every_n",
+"description":"Adds <sb/> every n measures",
+"userFacing": true,
+"params": {
+    "sbInterval":{
+        "type": "Number",
+        "default": 5
+    }},
+"scripts": [
+    "script_collection.add_sbs_every_n"
+]
+}
