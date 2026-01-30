@@ -102,7 +102,7 @@ def main():
     if args.filepath:
         files.append(args.file)
     else:
-        files = get_file_from_num(args.include)
+        files = get_file_from_id(args.include)
 
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
@@ -123,7 +123,7 @@ def main():
             return 1
 
 
-def get_file_from_num(*args):
+def get_file_from_id(*args):
     pass
 
 
