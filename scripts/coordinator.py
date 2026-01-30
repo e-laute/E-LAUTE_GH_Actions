@@ -5,6 +5,7 @@ Coordinates the workpackage with the associated file(s)
 import sys
 import os
 import argparse
+from pathlib import Path
 import importlib
 import json
 from lxml import etree
@@ -19,7 +20,7 @@ include.add_argument(
 )
 include.add_argument("-f", "--filepath", help="A specific filepath")
 parser.add_argument(
-    "-w", "--workpackage", required=True, help="The workpackage to be executed"
+    "-w", "--workpackage_id", required=True, help="The id of the workpackage to be executed"
 )
 parser.add_argument(
     "-a",
@@ -28,11 +29,10 @@ parser.add_argument(
     help="Additional arguments required by the workpackage, formatted key=value",
 )
 
-with open("workpackages.json") as f:
-    workpackages_dic = json.load(f)
 
 
-def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
+
+def execute_workpackage(filepath: str, workpackage: dict, params: dict):
     """
     Parses filepath, loads the specefied workpackage from workpath
     and calls the designated scripts on the parsed file.
@@ -46,17 +46,12 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
     try:
         scripts_list = workpackage["scripts"]
     except KeyError:
-        raise Exception("Faulty workpackage, missing 'scripts'")
+        raise KeyError("Faulty workpackage, missing 'scripts'")
 
-    with open(filepath) as f:
-        tree = etree.parse(f, etree.XMLParser(recover=True))
-    root = tree.getroot()
+    active_dom = parse_and_wrap_dom(filepath)
 
     # TODO differentiate sibling type
-    if workpackage["sibling"]:
-        sibling_root = getsibling(filepath)
-    else:
-        sibling_root = None
+    context_doms = get_siblings(filepath)
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
@@ -68,7 +63,7 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
             mod: importlib.import_module(mod) for mod in modules_list
         }
     except ImportError:
-        raise Exception("Unknown module")
+        raise NameError("Unknown module")
 
     for script in scripts_list:
         module_path, _dot, func_name = script.rpartition(".")
@@ -76,12 +71,26 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
         if current_func is None:
             raise Exception(f"Unknown script or wrong module path: {script}")
         # TODO currently scripts need to handle all input
-        root = current_func(root, sibling_root, addargs)
+        root = current_func(params, active_dom, context_doms)
 
 
-def getsibling(filepath):
+def get_siblings(filepath):
+    """return list of dicionaries [{filename:, type:, dom:}]"""
+    return []
+    parse_and_wrap_dom(sibling_path)
     pass
 
+def parse_and_wrap_dom(filepath):
+    with open(filepath) as f:
+        tree = etree.parse(f, etree.XMLParser(recover=True))
+    root = tree.getroot()
+    filename = Path(filepath).stem
+    notationtype = determine_notationtype(filepath)
+    return {"filename":filename,"dom":root,"notationtype":notationtype}
+
+def determine_notationtype(filepath):
+    #TODO
+    return "ed_CMN"
 
 def main():
     """
@@ -94,17 +103,19 @@ def main():
     # TODO check for validity of workpackage x filetype, multiple files
     args = parser.parse_args()
 
-    try:
-        workpackage = workpackages_dic[
-            args.workpackage
-        ]  # argv needs to contain workpackage
-    except KeyError:
-        print(f"::error::Unknown workpackage: {args.workpackage}")
-        return 1
+    #TODO specify as arg
+    with open("work_package_example.json") as f:
+        workpackages_list = json.load(f)
+    for canditate in workpackages_list:
+        if canditate["id"] == args.workpackage_id:
+            workpackage = canditate
+            break
+    if not workpackage:
+        raise KeyError("Workpackage_id not found")
 
     files = []
     if args.filepath:
-        files.append(args.file)
+        files.append(args.filepath)
     else:
         files = get_file_from_id(args.include)
 
