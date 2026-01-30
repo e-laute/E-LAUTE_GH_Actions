@@ -1,16 +1,19 @@
+import copy
+import math
 import os
 import re
-from lxml import etree
-import copy
 import sys
-import math
+
+from lxml import etree
 from utils import *
 
+ns = {
+    "mei": "http://www.music-encoding.org/ns/mei",
+    "xml": "http://www.w3.org/XML/1998/namespace",
+}
 
-ns = {"mei":"http://www.music-encoding.org/ns/mei",
-        "xml":"http://www.w3.org/XML/1998/namespace"}
 
-def add_sbs_every_n(root:etree.Element,n:int=5):
+def add_sbs_every_n(root: etree.Element, n: int = 5):
     """Function description.
 
     Args:
@@ -31,15 +34,14 @@ def add_sbs_every_n(root:etree.Element,n:int=5):
         if count == 5:
             sb = etree.Element("sb")
             parent = measure.getparent()
-            parent.insert(parent.index(measure)+1,sb)
+            parent.insert(parent.index(measure) + 1, sb)
         else:
             count += 1
 
-    
     return root
 
 
-def remove_sbs(root:etree.Element):
+def remove_sbs(root: etree.Element):
     """Remove all sbs.
 
     Args:
@@ -53,14 +55,15 @@ def remove_sbs(root:etree.Element):
     """
 
     sbs = root.xpath(".//mei:sb", namespaces=ns)
-    
+
     for sb in sbs:
         parent = sb.getparent()
         parent.remove(sb)
 
-    return root    
+    return root
 
-def function(root:etree.Element):
+
+def function(root: etree.Element):
     """Function description.
 
     Args:
@@ -77,5 +80,5 @@ def function(root:etree.Element):
     output_str = ""
 
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
-    
-    return root,output_str
+
+    return root, output_str
