@@ -64,11 +64,16 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
 
 
 def get_context_doms(filepath: Path):
-    """return list of dicionaries [{filename:, notationtype:, dom:}]
-    E-LAUTE specific implementation: context_doms are always in the same repository"""
+    """
+    return list of dicionaries [{filename:, notationtype:, dom:}] containing context_doms
+    E-LAUTE specific implementation: context_doms are always in the same repository
+
+    :param filepath: the filepath where to look for context_doms
+    :type filepath: Path
+    """
 
     directory = filepath.parent
-    extension = filepath.suffix  # should be ".mei"
+    extension = ".mei"
 
     # 2. Find files with the same extension, excluding the original file, call wrapper
     other_files = [
@@ -83,7 +88,7 @@ def parse_and_wrap_dom(filepath: Path):
     """
     Creates wrapping {filename:, notationtype:, dom:} by parsing file
 
-    :param filepath: Description
+    :param filepath: The filepath of the file to be parsed and wrapped
     :type filepath: Path
     """
     tree = etree.parse(filepath, etree.XMLParser(recover=True))
@@ -94,8 +99,20 @@ def parse_and_wrap_dom(filepath: Path):
 
 
 def determine_notationtype(filepath: Path):
-    # TODO
-    return "ed_CMN"
+    """
+    Determines notationtype of mei.
+    E-LAUTE specific implementaion: from filename (dipl|ed)_(GLT|FLT|ILT|CMN)
+
+    :param filepath: The filepath from which to compute notation_type
+    :type filepath: Path
+    """
+    # gets end of filename containing notationtype information
+    notationtype_re = re.match(
+        r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))\.mei", filepath.stem
+    )
+    if notationtype_re is None:
+        raise NameError(f"{filepath.stem} doesn't fit E_LAUTE naming conventions")
+    return notationtype_re.group(3)
 
 
 def main():
