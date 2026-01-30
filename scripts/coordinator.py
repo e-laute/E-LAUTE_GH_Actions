@@ -5,6 +5,7 @@ Coordinates the workpackage with the associated file(s)
 import argparse
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -44,8 +45,8 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     """
     try:
         scripts_list = workpackage["scripts"]
-    except KeyError:
-        raise KeyError("Faulty workpackage, missing 'scripts'")
+    except KeyError as e:
+        raise KeyError("Faulty workpackage, missing 'scripts'") from e
 
     active_dom = parse_and_wrap_dom(filepath)
 
@@ -57,16 +58,29 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     modules_list = list(set([script.rpartition(".")[0] for script in scripts_list]))
     try:
         modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
-    except ImportError:
-        raise NameError("Unknown module")
+    except ImportError as e:
+        raise NameError("Unknown module") from e
 
     for script in scripts_list:
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
         if current_func is None:
             raise Exception(f"Unknown script or wrong module path: {script}")
-        # TODO currently scripts need to handle all input
-        active_dom = current_func(params, active_dom, context_doms)
+        # scripts take active_dom:dict, context_dom:list[dict], params:dict
+        try:
+            active_dom = current_func(active_dom, context_doms, **params)
+        except TypeError as e:
+            # "...missing 1 required positional argument: 'x'" -> params was missing key
+            if "missing" in str(e):
+                # Extract argument names inside single quotes
+                missing_names = re.findall(r"'(.*?)'", str(e))
+                arg_list = ", ".join(missing_names)
+                raise KeyError(
+                    f"The additional arguments passed are incomplete, {func_name} requires: {arg_list}"
+                ) from e
+            else:
+                # If it's a different kind of TypeError, re-raise it
+                raise e
 
 
 def get_context_doms(filepath: Path):

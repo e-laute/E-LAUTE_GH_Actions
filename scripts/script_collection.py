@@ -13,19 +13,20 @@ ns = {
 }
 
 
-def add_sbs_every_n(root: etree.Element, n: int = 5):
-    """Function description.
-
-    Args:
-      root: The root of the parsed tree of the MEI-file.
-      n (optional): Int describing the number of measures between sb.
-
-    Returns:
-      The changed root.
-
-    Raises:
-      Error-type: Any potential Errors.
+def add_sbs_every_n(active_dom: dict, context_doms: list, n: int, **addargs):
     """
+    Adds `<sb>` every n measures
+
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param n: interval of system beginnings
+    :type n: int
+    :param addargs: Addional arguments that are unused
+    """
+
+    root = active_dom["dom"]
 
     measures = root.xpath(".//mei:measure", namespaces=ns)
 
@@ -38,21 +39,22 @@ def add_sbs_every_n(root: etree.Element, n: int = 5):
         else:
             count += 1
 
-    return root
+    active_dom["dom"] = root
+    return active_dom
 
 
-def remove_sbs(root: etree.Element):
-    """Remove all sbs.
-
-    Args:
-      root: The root of the parsed tree of the MEI-file.
-
-    Returns:
-      The changed root.
-
-    Raises:
-      Error-type: Any potential Errors.
+def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
     """
+    Removes all `<sb>`
+
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param addargs: Addional arguments that are unused
+    """
+
+    root = active_dom["dom"]
 
     sbs = root.xpath(".//mei:sb", namespaces=ns)
 
@@ -60,25 +62,24 @@ def remove_sbs(root: etree.Element):
         parent = sb.getparent()
         parent.remove(sb)
 
-    return root
+    active_dom["dom"] = root
+    return active_dom
 
 
-def function(root: etree.Element):
-    """Function description.
+def function(active_dom: dict, context_doms: list, **addargs):
+    """
+    template function
 
-    Args:
-      root: The root of the parsed tree of the MEI-file.
-
-    Returns:
-      The changed root.
-      Optional: The output string containing the formatted information.
-
-    Raises:
-      Error-type: Any potential Errors.
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param addargs: Addional arguments that are unused
     """
 
-    output_str = ""
+    root = active_dom["dom"]
 
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
 
-    return root, output_str
+    active_dom["dom"] = root
+    return active_dom
