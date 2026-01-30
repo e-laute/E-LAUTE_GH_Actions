@@ -3,7 +3,7 @@ Coordinates the workpackage with the associated file(s)
 """
 
 import sys
-from pathlib import Path
+import os
 import argparse
 import importlib
 import json
@@ -106,9 +106,9 @@ def main():
 
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-        mei_path = Path("caller-repo") / Path(filepath)
+        mei_path = os.path.join("caller-repo", filepath)
         print(f"Checking file: {mei_path}")
-        if not mei_path.is_file():
+        if not os.path.isfile(mei_path):
             print(f"::error::File not found: '{mei_path}'")
             return 2
 
