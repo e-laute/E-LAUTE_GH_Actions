@@ -8,6 +8,7 @@
         "default": 5
     }},
 "scripts": [
-    "script_collection.add_sbs_every_n"
+    "script_collection.add_sbs_every_n",
+    "script_collection.write_output"
 ]
 }]

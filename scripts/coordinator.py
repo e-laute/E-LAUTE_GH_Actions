@@ -121,7 +121,8 @@ def main():
 
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-        mei_path = os.path.join("caller-repo", filepath)
+        #mei_path = os.path.join("caller-repo", filepath)
+        mei_path = filepath
         print(f"Checking file: {mei_path}")
         if not os.path.isfile(mei_path):
             print(f"::error::File not found: '{mei_path}'")
