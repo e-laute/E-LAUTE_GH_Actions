@@ -2,12 +2,12 @@
 Coordinates the workpackage with the associated file(s)
 """
 
-import sys
-import os
 import argparse
-from pathlib import Path
 import importlib
 import json
+import sys
+from pathlib import Path
+
 from lxml import etree
 
 # initializing
@@ -15,12 +15,13 @@ parser = argparse.ArgumentParser(
     description="Coordinates the execution of scripts in the workpackage on filepath"
 )
 include = parser.add_mutually_exclusive_group(required=True)
-include.add_argument(
-    "-i", "--include", nargs="*", help="Included files by id number"
-)
+include.add_argument("-i", "--include", nargs="*", help="Included files by id number")
 include.add_argument("-f", "--filepath", help="A specific filepath")
 parser.add_argument(
-    "-w", "--workpackage_id", required=True, help="The id of the workpackage to be executed"
+    "-w",
+    "--workpackage_id",
+    required=True,
+    help="The id of the workpackage to be executed",
 )
 parser.add_argument(
     "-a",
@@ -28,8 +29,6 @@ parser.add_argument(
     nargs="*",
     help="Additional arguments required by the workpackage, formatted key=value",
 )
-
-
 
 
 def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
@@ -55,13 +54,9 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
-    modules_list = list(
-        set([script.rpartition(".")[0] for script in scripts_list])
-    )
+    modules_list = list(set([script.rpartition(".")[0] for script in scripts_list]))
     try:
-        modules_dic = {
-            mod: importlib.import_module(mod) for mod in modules_list
-        }
+        modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
     except ImportError:
         raise NameError("Unknown module")
 
@@ -74,37 +69,51 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         active_dom = current_func(params, active_dom, context_doms)
 
 
-def get_context_doms(filepath:Path):
-    """return list of dicionaries [{filename:, notationtype:, dom:}]"""
+def get_context_doms(filepath: Path):
+    """return list of dicionaries [{filename:, notationtype:, dom:}]
+    E-LAUTE specific implementation: context_doms are always in the same repository"""
+
+    directory = filepath.parent
+    extension = filepath.suffix  # should be ".mei"
+
+    # 2. Find files with the same extension, excluding the original file, call wrapper
+    other_files = [
+        parse_and_wrap_dom(f) for f in directory.glob(f"*{extension}") if f != filepath
+    ]
+
+    return other_files
 
 
-    return []
-    parse_and_wrap_dom(sibling_path)
-    pass
+def parse_and_wrap_dom(filepath: Path):
+    # TODO should wrapping include filepath:Path or filename:str?
+    """
+    Creates wrapping {filename:, notationtype:, dom:} by parsing file
 
-def parse_and_wrap_dom(filepath:Path):
+    :param filepath: Description
+    :type filepath: Path
+    """
     tree = etree.parse(filepath, etree.XMLParser(recover=True))
     root = tree.getroot()
     filename = filepath.stem
     notationtype = determine_notationtype(filepath)
-    return {"filename":filename,"dom":root,"notationtype":notationtype}
+    return {"filename": filename, "dom": root, "notationtype": notationtype}
 
-def determine_notationtype(filepath:Path):
-    #TODO
+
+def determine_notationtype(filepath: Path):
+    # TODO
     return "ed_CMN"
+
 
 def main():
     """
     Parses Arguments, selects file, calls coordinator on files with workpackage
     """
-    # TODO needs to be rewritten to fit new design
-    # TODO needs to handle arguments passed, maybe argparse?
+    # TODO misses -nt --notationtype, -e --exclude
     # For now assumes python coordinator.py filepath workpackage additional arguments
-    # TODO needs to be able to handle multiple files
     # TODO check for validity of workpackage x filetype, multiple files
     args = parser.parse_args()
 
-    #TODO specify as arg
+    # TODO specify as arg
     with open("work_package_example.json") as f:
         workpackages_list = json.load(f)
     for canditate in workpackages_list:
@@ -122,7 +131,7 @@ def main():
 
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-        #mei_path = Path("caller-repo", filepath)
+        # mei_path = Path("caller-repo", filepath)
         mei_path = Path(filepath)
         print(f"Checking file: {mei_path}")
         if not mei_path.is_file():
@@ -130,9 +139,7 @@ def main():
             return 2
 
         try:
-            execute_workpackage(
-                mei_path, workpackage, addargs_to_dic(args.addargs)
-            )
+            execute_workpackage(mei_path, workpackage, addargs_to_dic(args.addargs))
             print("::notice::Process completed successfully")
             return 0
         except Exception as e:
