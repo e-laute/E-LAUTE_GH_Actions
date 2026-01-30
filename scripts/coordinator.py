@@ -60,14 +60,18 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
-    modules_list = list(set([script.rpartition(".")[0] for script in scripts_list]))
+    modules_list = list(
+        set([script.rpartition(".")[0] for script in scripts_list])
+    )
     try:
-        modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
+        modules_dic = {
+            mod: importlib.import_module(mod) for mod in modules_list
+        }
     except ImportError:
         raise Exception("Unknown module")
 
     for script in scripts_list:
-        module_path, dot, func_name = script.rpartition(".")
+        module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
         if current_func is None:
             raise Exception(f"Unknown script or wrong module path: {script}")
