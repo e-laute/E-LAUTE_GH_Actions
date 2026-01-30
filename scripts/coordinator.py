@@ -45,7 +45,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
         if current_func is None:
-            raise Exception(f"Unknown script or wrong module path: {script}")
+            raise AttributeError(f"Unknown script or wrong module path: {script}")
         # scripts take active_dom:dict, context_dom:list[dict], params:dict
         try:
             active_dom = current_func(active_dom, context_doms, **params)
