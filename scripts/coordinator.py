@@ -32,7 +32,7 @@ parser.add_argument(
 
 
 
-def execute_workpackage(filepath: str, workpackage: dict, params: dict):
+def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     """
     Parses filepath, loads the specefied workpackage from workpath
     and calls the designated scripts on the parsed file.
@@ -51,7 +51,7 @@ def execute_workpackage(filepath: str, workpackage: dict, params: dict):
     active_dom = parse_and_wrap_dom(filepath)
 
     # TODO differentiate sibling type
-    context_doms = get_siblings(filepath)
+    context_doms = get_context_doms(filepath)
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
@@ -71,24 +71,25 @@ def execute_workpackage(filepath: str, workpackage: dict, params: dict):
         if current_func is None:
             raise Exception(f"Unknown script or wrong module path: {script}")
         # TODO currently scripts need to handle all input
-        root = current_func(params, active_dom, context_doms)
+        active_dom = current_func(params, active_dom, context_doms)
 
 
-def get_siblings(filepath):
-    """return list of dicionaries [{filename:, type:, dom:}]"""
+def get_context_doms(filepath:Path):
+    """return list of dicionaries [{filename:, notationtype:, dom:}]"""
+
+
     return []
     parse_and_wrap_dom(sibling_path)
     pass
 
-def parse_and_wrap_dom(filepath):
-    with open(filepath) as f:
-        tree = etree.parse(f, etree.XMLParser(recover=True))
+def parse_and_wrap_dom(filepath:Path):
+    tree = etree.parse(filepath, etree.XMLParser(recover=True))
     root = tree.getroot()
-    filename = Path(filepath).stem
+    filename = filepath.stem
     notationtype = determine_notationtype(filepath)
     return {"filename":filename,"dom":root,"notationtype":notationtype}
 
-def determine_notationtype(filepath):
+def determine_notationtype(filepath:Path):
     #TODO
     return "ed_CMN"
 
@@ -121,10 +122,10 @@ def main():
 
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-        #mei_path = os.path.join("caller-repo", filepath)
-        mei_path = filepath
+        #mei_path = Path("caller-repo", filepath)
+        mei_path = Path(filepath)
         print(f"Checking file: {mei_path}")
-        if not os.path.isfile(mei_path):
+        if not mei_path.is_file():
             print(f"::error::File not found: '{mei_path}'")
             return 2
 
