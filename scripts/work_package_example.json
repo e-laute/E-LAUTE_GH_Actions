@@ -1,4 +1,5 @@
-{"name":"add_sbs_every_n",
+[{"id": "add_sbs",
+"label":"Add system breaks",
 "description":"Adds <sb/> every n measures",
 "userFacing": true,
 "params": {
@@ -9,4 +10,4 @@
 "scripts": [
     "script_collection.add_sbs_every_n"
 ]
-}
+}]
