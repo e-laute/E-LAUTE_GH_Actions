@@ -44,7 +44,7 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
     :param addargs: arguments required for the workpackage
     """
     try:
-        scripts_li = workpackage["scripts"]
+        scripts_list = workpackage["scripts"]
     except KeyError:
         raise Exception("Faulty workpackage, missing 'scripts'")
 
@@ -60,13 +60,13 @@ def execute_workpackage(filepath: str, workpackage: dict, addargs: dict):
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
-    modules_li = list(set([script.rpartition(".")[0] for script in scripts_li]))
+    modules_li = list(set([script.rpartition(".")[0] for script in scripts_list]))
     try:
         modules_dic = {mod: importlib.import_module(mod) for mod in modules_li}
     except ImportError:
         raise Exception("Unknown module")
 
-    for script in scripts_li:
+    for script in scripts_list:
         module_path, dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
         if current_func is None:
