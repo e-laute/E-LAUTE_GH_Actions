@@ -11,26 +11,6 @@ from pathlib import Path
 
 from lxml import etree
 
-# initializing
-parser = argparse.ArgumentParser(
-    description="Coordinates the execution of scripts in the workpackage on filepath"
-)
-include = parser.add_mutually_exclusive_group(required=True)
-include.add_argument("-i", "--include", nargs="*", help="Included files by id number")
-include.add_argument("-f", "--filepath", help="A specific filepath")
-parser.add_argument(
-    "-w",
-    "--workpackage_id",
-    required=True,
-    help="The id of the workpackage to be executed",
-)
-parser.add_argument(
-    "-a",
-    "--addargs",
-    nargs="*",
-    help="Additional arguments required by the workpackage, formatted key=value",
-)
-
 
 def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     """
@@ -125,6 +105,7 @@ def main():
     # TODO misses -nt --notationtype, -e --exclude
     # For now assumes python coordinator.py filepath workpackage additional arguments
     # TODO check for validity of workpackage x filetype, multiple files
+    parser = initialize_parser()
     args = parser.parse_args()
 
     # TODO specify as arg
@@ -172,6 +153,32 @@ def addargs_to_dic(addargs: list):
             key, value = item.split("=", 1)  # Split only on the first '='
             kwargs[key] = value
     return kwargs
+
+
+def initialize_parser():
+    # TODO misses -nt --notationtype, -e --exclude
+    parser = argparse.ArgumentParser(
+        description="Coordinates the execution of scripts in the workpackage on filepath"
+    )
+
+    include = parser.add_mutually_exclusive_group(required=True)
+    include.add_argument(
+        "-i", "--include", nargs="*", help="Included files by id number"
+    )
+    include.add_argument("-f", "--filepath", help="A specific filepath")
+    parser.add_argument(
+        "-w",
+        "--workpackage_id",
+        required=True,
+        help="The id of the workpackage to be executed",
+    )
+    parser.add_argument(
+        "-a",
+        "--addargs",
+        nargs="*",
+        help="Additional arguments required by the workpackage, formatted key=value",
+    )
+    return parser
 
 
 if __name__ == "__main__":
