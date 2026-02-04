@@ -14,7 +14,7 @@ on:
       addargs:
         description: "Additional arguments required by the workpackage"
         required: false
-        type: array
+        type: string
         default: ""
 
 jobs:
@@ -54,4 +54,9 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run coordinator script
         run: |
-          python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage-id }} -f ${{ inputs.filepath }} -a ${{ inputs.addargs | join("") }}
+          cmd="python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }}"
+          addargs="${{ inputs.addargs }}"
+          if [ -n "$addargs" ]; then
+            cmd="$cmd -a $addargs"
+          fi
+          eval "$cmd"
