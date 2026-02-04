@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ""
+      commit_message:
+        description: "The commit message"
+        required: true
+        default: "GitHub Action: Apply workpackage to filepath"
+        type: string
 
 jobs:
   run-shared-script:
@@ -60,3 +65,10 @@ jobs:
             cmd="$cmd -a $addargs"
           fi
           eval "$cmd"
+
+      # 6. Commit changes
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: ${{ inputs.commit_message }}
+          repository: caller-repo
