@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 
 from lxml import etree
-from utils import *
+
+from utils import edit_appInfo
 
 JSON_TYPE_TO_PYTHON_TYPE = {"Number": int, "String": str}
 
@@ -124,7 +125,7 @@ def determine_notationtype(filepath: Path):
     notationtype_re = re.match(r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))", filepath.stem)
     if notationtype_re is None:
         raise NameError(f"{filepath.stem} doesn't fit E_LAUTE naming conventions")
-    return notationtype_re.group(3)
+    return notationtype_re.group(1)
 
 
 def main():
