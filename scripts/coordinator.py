@@ -226,7 +226,6 @@ def initialize_parser():
     parser.add_argument(
         "-a",
         "--addargs",
-        nargs="*",
         help="Additional arguments required by the workpackage, formatted key=value",
     )
     return parser
