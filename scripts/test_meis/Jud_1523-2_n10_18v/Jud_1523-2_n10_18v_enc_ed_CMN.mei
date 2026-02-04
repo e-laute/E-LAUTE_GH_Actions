@@ -14,35 +14,6 @@
             <title type="normalized">Wo soll ich mich hin kehren
             </title>
             <respStmt>
-               <!-- editorial team -->
-               <persName role="musescoreEditor" auth.uri="https://e-laute.info/data/projectstaff/16"
-                  xml:id="projectstaff-16">
-                  <foreName>Henning</foreName>
-                  <famName>Burghoff</famName>
-               </persName>
-               <persName role="meiEditor" auth.uri="https://e-laute.info/data/projectstaff/16"
-                  corresp="projectstaff-16">
-                  <foreName>Henning</foreName>
-                  <famName>Burghoff</famName>
-               </persName>
-               <persName role="meiEditor" auth.uri="https://e-laute.info/data/projectstaff/11"
-                  xml:id="projectstaff-11">
-                  <foreName>Olja</foreName>
-                  <famName>Janjuš</famName>
-               </persName>
-               <!-- meiHead modelers -->
-               <persName role="metadataContact"
-                  auth.uri="https://e-laute.info/data/projectstaff/10"
-                  xml:id="projectstaff-10">
-                  <foreName>Ilias</foreName>
-                  <famName>Kyriazis</famName>
-               </persName>
-               <persName role="metadataContact"
-                  auth.uri="https://e-laute.info/data/projectstaff/15"
-                  xml:id="projectstaff-15">
-                  <foreName>Julia</foreName>
-                  <famName>Jaklin</famName>
-               </persName>
                <!-- E-LAUTE administration -->
                <corpName role="provider" xml:id="elaute">
                   <ref target="https://doi.org/10.55776/I6019 ">
