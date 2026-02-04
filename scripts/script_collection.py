@@ -104,7 +104,7 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     ed_glt = ("fnf", 0)
     ed_CMN = ("fnf", 0)
 
-    doms = context_doms.append(active_dom)
+    doms = [active_dom] + context_doms
 
     for dom in doms:
         match dom["notationtype"]:
@@ -125,7 +125,7 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     else:
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
-    print("File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN")
+    print("File\tdi_GLT\tdi_CMN\ted_GLT\t\ted_CMN")
     print("\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list]))
 
     return active_dom
