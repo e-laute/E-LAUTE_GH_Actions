@@ -13,6 +13,8 @@ ns = {
     "xml": "http://www.w3.org/XML/1998/namespace",
 }
 
+XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
+
 
 def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **addargs):
     """
@@ -107,12 +109,14 @@ def add_header_from_GLT(
     else:
         raise ValueError("add_header_from_GLT needs context_dom ed_GLT, not given")
 
+    """    
     if root.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
         namespaces=ns,
     ):
         print(f"{active_dom["filename"]} already has header")
         return active_dom
+    """
 
     if not helproot.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
@@ -131,10 +135,10 @@ def add_header_from_GLT(
     titlePart.text = "CMN"
 
     edition = header.find(".//mei:edition", namespaces=ns)
-    edition.set("resp", projectstaff)
+    edition.set("resp", f"#{projectstaff}")
     edition.text = f"First {'diplomatic transcription' if 'dipl' in active_dom["notationtype"] else 'edition'} in CMN. Lute tuned in A."
 
-    judenkunig = header.xpath(".//mei:persName[@corresp='#persons-78']", namespaces=ns)
+    judenkunig = header.xpath(".//mei:persName[@xml:id='persons-78']", namespaces=ns)
     if judenkunig:
         judenkunig[0].set("role", role)
 
