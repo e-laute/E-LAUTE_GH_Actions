@@ -60,11 +60,11 @@ jobs:
       - name: Run coordinator script
         run: |
           addargs='${{ inputs.addargs }}'
-          if [ -n $addargs ]; then
-            python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }} -a $addargs
+          if [ -n '$addargs' ]; then
+            python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }} -a '$addargs'
           else
             python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }}
-          fi
+          fi'
 
       # 6. Commit changes
       - name: Commit changes
