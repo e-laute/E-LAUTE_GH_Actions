@@ -14,13 +14,6 @@
             <title type="normalized">Wo soll ich mich hin kehren
             </title>
             <respStmt>
-               <!-- E-LAUTE administration -->
-               <corpName role="provider" xml:id="elaute">
-                  <ref target="https://doi.org/10.55776/I6019 ">
-                     <abbr>E-LAUTE</abbr>
-                     <expan>Electronic Linked Annotated Unified Tablature Edition</expan>
-                  </ref>
-               </corpName>
                <corpName role="funder" xml:id="weave">
                   <ref target="https://weave-research.net/">Weave</ref>
                </corpName>
