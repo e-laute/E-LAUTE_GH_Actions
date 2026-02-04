@@ -138,7 +138,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
 
     # TODO specify as arg
     with open(Path("shared-actions", "scripts", "work_package_example.json")) as f:
-        workpackages_list = json.load(f)
+        workpackages_list = json.loads(f)
     for candidate in workpackages_list:
         if candidate["id"] == workpackage_id:
             workpackage = candidate
