@@ -168,8 +168,7 @@ def parse_addargs(addargs: str):
     if addargs is None:
         return {}
     try:
-        print(addargs)
-        addargs_parsed = json.load(addargs)
+        addargs_parsed = json.loads(addargs)
         if not (addargs_parsed, dict):
             raise TypeError
     except Exception as e:
