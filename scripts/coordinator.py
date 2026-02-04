@@ -168,7 +168,6 @@ def parse_addargs(addargs: str):
     if addargs is None:
         return {}
     try:
-        print(addargs)
         addargs_parsed = json.loads(addargs)
         if not (addargs_parsed, dict):
             raise TypeError
@@ -238,7 +237,6 @@ def initialize_parser():
 
 
 if __name__ == "__main__":
-    print(sys.argv)
     parser = initialize_parser()
     args = parser.parse_args()
     sys.exit(
