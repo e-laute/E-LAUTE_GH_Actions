@@ -12,6 +12,8 @@ from pathlib import Path
 from lxml import etree
 from utils import *
 
+JSON_TYPE_TO_PYTHON_TYPE = {"Number": int, "String": str}
+
 
 def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     """
@@ -63,8 +65,8 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
                 # If it's a different kind of TypeError, re-raise it
                 raise e
 
-    if workpackage["commitResults"]:
-        edit_appInfo(active_dom, workpackage["label"])
+    if workpackage["commitResult"]:
+        edit_appInfo(active_dom["dom"], workpackage["label"])
         with open(filepath, "wb") as f:
             tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
 
@@ -115,9 +117,7 @@ def determine_notationtype(filepath: Path):
     :type filepath: Path
     """
     # gets end of filename containing notationtype information
-    notationtype_re = re.match(
-        r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))\.mei", filepath.stem
-    )
+    notationtype_re = re.match(r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))", filepath.stem)
     if notationtype_re is None:
         raise NameError(f"{filepath.stem} doesn't fit E_LAUTE naming conventions")
     return notationtype_re.group(3)
@@ -134,7 +134,7 @@ def main():
     args = parser.parse_args()
 
     # TODO specify as arg
-    with open("work_package_example.json") as f:
+    with open(Path("scripts", "work_package_example.json")) as f:
         workpackages_list = json.load(f)
     for canditate in workpackages_list:
         if canditate["id"] == args.workpackage_id:
@@ -149,6 +149,7 @@ def main():
     else:
         files = get_file_from_id(args.include)
 
+    dic_add_args = check_addargs_against_json(addargs_to_dic(args.addargs), workpackage)
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
         # mei_path = Path("caller-repo", filepath)
@@ -158,20 +159,47 @@ def main():
             print(f"::error::File not found: '{mei_path}'")
             return 2
 
-        try:
-            execute_workpackage(mei_path, workpackage, addargs_to_dic(args.addargs))
-            print("::notice::Process completed successfully")
-            return 0
-        except Exception as e:
-            print(f"::error::Failed to process file: {e}")
-            return 1
+        # try:
+        execute_workpackage(mei_path, workpackage, dic_add_args)
+        print("::notice::Process completed successfully")
+        return 0
+        # except Exception as e:
+        #   print(f"::error::Failed to process file: {e}")
+        #  return 1
 
 
 def get_file_from_id(*args):
     pass
 
 
+def check_addargs_against_json(addargs_dic: dict, workpackage: dict):
+    params = workpackage["params"]
+
+    return_addargs = {}
+
+    for key, value in params.items():
+        if key in addargs_dic:
+            if "type" not in value:
+                raise KeyError(f"Parameter {key} misses type")
+            try:
+                return_addargs[key] = JSON_TYPE_TO_PYTHON_TYPE[value["type"]](
+                    addargs_dic[key]
+                )
+            except ValueError as e:
+                raise ValueError(
+                    f"User input for {key} isn't of type {value['type']}"
+                ) from e
+        elif "default" in value:
+            return_addargs[key] = value["default"]
+        else:
+            raise ValueError(f"Missing additional argument {key}")
+
+    return return_addargs
+
+
 def addargs_to_dic(addargs: list):
+    if not addargs:
+        return {}
     kwargs = {}
     for item in addargs:
         if "=" in item:

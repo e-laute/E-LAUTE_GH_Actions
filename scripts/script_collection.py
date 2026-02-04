@@ -43,7 +43,7 @@ def write_output(
     return active_dom
 
 
-def add_sbs_every_n(active_dom: dict, context_doms: list, n: int, **addargs):
+def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **addargs):
     """
     Adds `<sb>` every n measures
 
@@ -60,7 +60,7 @@ def add_sbs_every_n(active_dom: dict, context_doms: list, n: int, **addargs):
 
     measures = root.xpath(".//mei:measure", namespaces=ns)
 
-    count = n
+    count = sbInterval
     for measure in measures:
         if count == 5:
             sb = etree.Element("sb")
