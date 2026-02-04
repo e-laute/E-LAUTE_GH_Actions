@@ -59,12 +59,12 @@ jobs:
       # 5. Run the shared script *on the caller repo*
       - name: Run coordinator script
         run: |
-          cmd="python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }}"
-          addargs="${{ inputs.addargs }}"
-          if [ -n "$addargs" ]; then
-            cmd="$cmd -a $addargs"
-          fi
-          eval "$cmd"
+          addargs='${{ inputs.addargs }}'
+          if [ -n '$addargs' ]; then
+            python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }} -a '$addargs'
+          else
+            python shared-actions/scripts/coordinator.py -w ${{ inputs.workpackage_id }} -f ${{ inputs.filepath }}
+          fi'
 
       # 6. Commit changes
       - name: Commit changes
