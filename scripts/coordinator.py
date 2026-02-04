@@ -10,9 +10,8 @@ import sys
 from pathlib import Path
 
 from lxml import etree
-from utils import *
 
-from pprint import pprint
+from utils import edit_appInfo
 
 JSON_TYPE_TO_PYTHON_TYPE = {"Number": int, "String": str}
 
@@ -37,7 +36,6 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
 
     # TODO differentiate sibling type
     context_doms = get_context_doms(filepath)
-    pprint(context_doms)
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
