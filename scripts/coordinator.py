@@ -210,6 +210,9 @@ def addargs_to_dic(addargs: list):
     :param addargs: input from user as list
     :type addargs: list
     """
+    if addargs is None:
+        return {}
+
     kwargs = {}
     for item in addargs:
         if "=" in item:
