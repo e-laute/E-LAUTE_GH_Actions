@@ -15,7 +15,7 @@ ns = {
 
 
 def write_output(
-    active_dom: dict, context_doms: list, output_path: Path = None**addargs
+    active_dom: dict, context_doms: list, output_path: Path = None, **addargs
 ):
     # TODO tree.write needs tree not root. Either all scripts do tree.getroot or
     # write output gets treated differenly
