@@ -137,7 +137,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     # TODO check for validity of workpackage x filetype, multiple files
 
     # TODO specify as arg
-    with open(Path("scripts", "work_package_example.json")) as f:
+    with open(Path("caller-repo", "scripts", "work_package_example.json")) as f:
         workpackages_list = json.load(f)
     for candidate in workpackages_list:
         if candidate["id"] == workpackage_id:
