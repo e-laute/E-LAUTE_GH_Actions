@@ -38,9 +38,13 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
 
     # scripts in the JSON is a list of module to function paths (dir.subdir.module.func)
     # modules_dic contains the path of the module as key (dir.subdir.module) and the loaded module as item
-    modules_list = list(set([script.rpartition(".")[0] for script in scripts_list]))
+    modules_list = list(
+        set([script.rpartition(".")[0] for script in scripts_list])
+    )
     try:
-        modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
+        modules_dic = {
+            mod: importlib.import_module(mod) for mod in modules_list
+        }
     except ImportError as e:
         raise NameError("Unknown module") from e
 
@@ -48,7 +52,9 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
         if current_func is None:
-            raise AttributeError(f"Unknown script or wrong module path: {script}")
+            raise AttributeError(
+                f"Unknown script or wrong module path: {script}"
+            )
         # scripts take active_dom:dict, context_dom:list[dict], params:dict
         try:
             active_dom = current_func(active_dom, context_doms, **params)
@@ -68,7 +74,9 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     if workpackage["commitResult"]:
         edit_appInfo(active_dom["dom"], workpackage["label"])
         with open(filepath, "wb") as f:
-            tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+            tree.write(
+                f, encoding="UTF-8", pretty_print=True, xml_declaration=True
+            )
 
 
 def get_context_doms(filepath: Path):
@@ -105,7 +113,11 @@ def parse_and_wrap_dom(filepath: Path):
     root = tree.getroot()
     filename = filepath.stem
     notationtype = determine_notationtype(filepath)
-    return {"filename": filename, "dom": root, "notationtype": notationtype}, tree
+    return {
+        "filename": filename,
+        "dom": root,
+        "notationtype": notationtype,
+    }, tree
 
 
 def determine_notationtype(filepath: Path):
@@ -117,9 +129,13 @@ def determine_notationtype(filepath: Path):
     :type filepath: Path
     """
     # gets end of filename containing notationtype information
-    notationtype_re = re.match(r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))", filepath.stem)
+    notationtype_re = re.match(
+        r".+_enc_((dipl|ed)_(GLT|FLT|ILT|CMN))", filepath.stem
+    )
     if notationtype_re is None:
-        raise NameError(f"{filepath.stem} doesn't fit E_LAUTE naming conventions")
+        raise NameError(
+            f"{filepath.stem} doesn't fit E_LAUTE naming conventions"
+        )
     return notationtype_re.group(3)
 
 
@@ -136,9 +152,9 @@ def main():
     # TODO specify as arg
     with open(Path("scripts", "work_package_example.json")) as f:
         workpackages_list = json.load(f)
-    for canditate in workpackages_list:
-        if canditate["id"] == args.workpackage_id:
-            workpackage = canditate
+    for candidate in workpackages_list:
+        if candidate["id"] == args.workpackage_id:
+            workpackage = candidate
             break
     if not workpackage:
         raise KeyError("Workpackage_id not found")
@@ -149,7 +165,9 @@ def main():
     else:
         files = get_file_from_id(args.include)
 
-    dic_add_args = check_addargs_against_json(addargs_to_dic(args.addargs), workpackage)
+    dic_add_args = check_addargs_against_json(
+        addargs_to_dic(args.addargs), workpackage
+    )
     for filepath in files:
         # hardcode 'caller-repo/' prefix to refer to caller (source) repository
         # mei_path = Path("caller-repo", filepath)
