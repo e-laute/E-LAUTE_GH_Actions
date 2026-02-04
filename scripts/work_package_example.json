@@ -29,5 +29,22 @@
       "script_collection.add_sbs_every_n"
     ],
     "commitResult": true
+  },
+  {
+    "id": "add_header_from_GLT",
+    "label": "Add Header from ed_GLT",
+    "description": "Adds header from GLT with needed adjustments for ed_CMN",
+    "userFacing": true,
+    "params": {
+      "projectstaff": {
+        "type": "String"
+      },
+      "role": {
+        "type": "String",
+        "default": "typesetter"
+      }
+    },
+    "scripts": ["script_collection.add_header_from_GLT"],
+    "commitResult": true
   }
 ]
