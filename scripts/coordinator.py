@@ -147,37 +147,34 @@ def main():
     if not workpackage:
         raise KeyError("Workpackage_id not found")
 
-    files = []
-    if args.filepath:
-        files.append(args.filepath)
-    else:
-        files = get_file_from_id(args.include)
-
     dic_add_args = check_addargs_against_json(addargs_to_dic(args.addargs), workpackage)
-    for filepath in files:
-        # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-        # mei_path = Path("caller-repo", filepath)
-        mei_path = Path(filepath)
-        print(f"Checking file: {mei_path}")
-        if not mei_path.is_file():
-            print(f"::error::File not found: '{mei_path}'")
-            return 2
+    # hardcode 'caller-repo/' prefix to refer to caller (source) repository
+    # mei_path = Path("caller-repo", filepath)
+    mei_path = Path(args.filepath)
+    print(f"Checking file: {mei_path}")
+    if not mei_path.is_file():
+        print(f"::error::File not found: '{mei_path}'")
+        return 2
 
-        # try:
-        execute_workpackage(mei_path, workpackage, dic_add_args)
-        print("::notice::Process completed successfully")
-        return 0
-        # except Exception as e:
-        #   print(f"::error::Failed to process file: {e}")
-        #  return 1
-
-
-def get_file_from_id(*args):
-    pass
+    # try:
+    execute_workpackage(mei_path, workpackage, dic_add_args)
+    print("::notice::Process completed successfully")
+    return 0
+    # except Exception as e:
+    #   print(f"::error::Failed to process file: {e}")
+    #  return 1
 
 
 def check_addargs_against_json(addargs_dic: dict, workpackage: dict):
-    print(addargs_dic)
+    """
+    Checks parsed user input against required parameters in JSON
+    Uses defaults if not provided by user
+
+    :param addargs_dic: parsed user input
+    :type addargs_dic: dict
+    :param workpackage: the chosen workpackage from the JSON
+    :type workpackage: dict
+    """
     params = workpackage["params"]
 
     return_addargs = {}
@@ -206,13 +203,21 @@ def check_addargs_against_json(addargs_dic: dict, workpackage: dict):
 
 
 def addargs_to_dic(addargs: list):
-    if not addargs:
-        return {}
+    """
+    Parses additional argument list [key=value,key=value] to dictionary
+
+    :param addargs: input from user as list
+    :type addargs: list
+    """
     kwargs = {}
     for item in addargs:
         if "=" in item:
             key, value = item.split("=", 1)  # Split only on the first '='
             kwargs[key] = value
+        else:
+            print(
+                f"Warning: Additional argument {item} doesn't adhere to key=value format, will be ignored"
+            )
     return kwargs
 
 
@@ -222,11 +227,7 @@ def initialize_parser():
         description="Coordinates the execution of scripts in the workpackage on filepath"
     )
 
-    include = parser.add_mutually_exclusive_group(required=True)
-    include.add_argument(
-        "-i", "--include", nargs="*", help="Included files by id number"
-    )
-    include.add_argument("-f", "--filepath", help="A specific filepath")
+    parser.add_argument("-f", "--filepath", help="A specific filepath")
     parser.add_argument(
         "-w",
         "--workpackage_id",
