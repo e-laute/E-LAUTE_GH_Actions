@@ -146,7 +146,16 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     if not workpackage:
         raise KeyError("Workpackage_id not found")
 
-    dic_add_args = check_addargs_against_json(addargs_to_dic(addargs), workpackage)
+    try:
+        print(addargs)
+        addargs_parsed = json.load(addargs)
+        if not (addargs_parsed, dict):
+            raise TypeError
+    except Exception as e:
+        raise ValueError(
+            "Addargs needs to be valid JSON with top layer in curly brackets (refer to template)"
+        ) from e
+    dic_add_args = check_addargs_against_json(addargs_parsed, workpackage)
     # hardcode 'caller-repo/' prefix to refer to caller (source) repository
     mei_path = Path("caller-repo", filepath)
     # mei_path = Path(filepath)
@@ -201,28 +210,6 @@ def check_addargs_against_json(addargs_dic: dict, workpackage: dict):
     return return_addargs
 
 
-def addargs_to_dic(addargs: list):
-    """
-    Parses additional argument list [key=value,key=value] to dictionary
-
-    :param addargs: input from user as list
-    :type addargs: list
-    """
-    if addargs is None:
-        return {}
-
-    kwargs = {}
-    for item in addargs:
-        if "=" in item:
-            key, value = item.split("=", 1)  # Split only on the first '='
-            kwargs[key] = value
-        else:
-            print(
-                f"Warning: Additional argument {item} doesn't adhere to key=value format, will be ignored"
-            )
-    return kwargs
-
-
 def initialize_parser():
     # TODO misses -nt --notationtype, -e --exclude
     parser = argparse.ArgumentParser(
@@ -239,7 +226,6 @@ def initialize_parser():
     parser.add_argument(
         "-a",
         "--addargs",
-        nargs="*",
         help="Additional arguments required by the workpackage, formatted key=value",
     )
     return parser
