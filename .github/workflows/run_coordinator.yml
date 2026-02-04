@@ -3,7 +3,7 @@ name: Run coordinator script
 on:
   workflow_call:
     inputs:
-      workpackage-id:
+      workpackage_id:
         description: "The id of the workpackage to be executed"
         required: true
         type: string
