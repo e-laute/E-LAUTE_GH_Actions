@@ -238,6 +238,7 @@ def initialize_parser():
 
 
 if __name__ == "__main__":
+    print(sys.argv)
     parser = initialize_parser()
     args = parser.parse_args()
     sys.exit(
