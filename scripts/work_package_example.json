@@ -12,5 +12,22 @@
     },
     "scripts": ["script_collection.add_sbs_every_n"],
     "commitResult": true
+  },
+  {
+    "id": "remove_and_add_sbs",
+    "label": "Remove all system breaks and add again",
+    "description": "Removes all <sb/>s and adds <sb/> every n measures",
+    "userFacing": true,
+    "params": {
+      "sbInterval": {
+        "type": "Number",
+        "default": 5
+      }
+    },
+    "scripts": [
+      "script_collection.remove_all_sbs",
+      "script_collection.add_sbs_every_n"
+    ],
+    "commitResult": true
   }
 ]
