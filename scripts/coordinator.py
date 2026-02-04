@@ -147,6 +147,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
         raise KeyError("Workpackage_id not found")
 
     try:
+        print(addargs)
         addargs_parsed = json.load(addargs)
         if not (addargs_parsed, dict):
             raise TypeError
