@@ -88,6 +88,94 @@ def _template_function(active_dom: dict, context_doms: list, **addargs):
     return active_dom
 
 
+def compare_mnums(active_dom: dict, context_doms: list, **addargs):
+    """
+    template function
+
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param addargs: Addional arguments that are unused
+    """
+
+    dipl_glt = ("fnf", 0)
+    dipl_CMN = ("fnf", 0)
+    ed_glt = ("fnf", 0)
+    ed_CMN = ("fnf", 0)
+
+    doms = context_doms.append(active_dom)
+
+    for dom in doms:
+        match dom["notationtype"]:
+            case "dipl_GLT":
+                dipl_glt = getmnum(dom["dom"])[0:2]
+            case "dipl_CMN":
+                dipl_CMN = getmnum(dom["dom"])[0:2]
+            case "ed_GLT":
+                ed_glt = getmnum(dom["dom"])
+            case "ed_CMN":
+                ed_CMN = getmnum(dom["dom"])
+
+    id_match = re.match(
+        r".+(n\d+)_([0-9rv-]+)_enc_((ed|dipl)_(CMN|GLT))", active_dom["filename"]
+    )
+    if id_match:
+        id_name = id_match.group(1)
+    else:
+        id_name = active_dom["filename"]
+    output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
+    print("File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN")
+    print("\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list]))
+
+    return active_dom
+
+
+def getmnum(root: etree.Element):
+    """returns @n of last measure"""
+
+    measures = root.xpath("//mei:measure", namespaces=ns)
+    measures_invis = root.xpath("//mei:measure[@right='invis']", namespaces=ns)
+    endings = root.xpath("//mei:ending", namespaces=ns)
+    has_pickup = measures[0].get("type", "no") == "pickup"
+
+    return (
+        measures[-1].get("n", "no_n"),
+        str(len(measures) - int(len(endings) / 2) - has_pickup),
+        str(len(measures)),
+        str(len(measures_invis)),
+    )
+
+
+def create_list(root: str, files: list):
+    dipl_glt = ("fnf", 0)
+    dipl_CMN = ("fnf", 0)
+    ed_glt = ("fnf", 0)
+    ed_CMN = ("fnf", 0)
+    filename = ("error", 0)
+
+    for file in files:
+        filematch = re.match(
+            r".+(n\d+)_([0-9rv-]+)_enc_((ed|dipl)_(CMN|GLT))\.mei", file
+        )
+        if filematch is not None:
+            filename = filematch.group(1)
+            match filematch.group(3):
+                case "dipl_GLT":
+                    dipl_glt = getmnum(os.path.join(root, file))[0:2]
+                case "dipl_CMN":
+                    dipl_CMN = getmnum(os.path.join(root, file))[0:2]
+                case "ed_GLT":
+                    ed_glt = getmnum(os.path.join(root, file))
+                case "ed_CMN":
+                    ed_CMN = getmnum(os.path.join(root, file))
+
+    # return [filename,dipl_glt,dipl_CMN,ed_glt,ed_CMN] if not (dipl_glt[0]==dipl_CMN[0]==ed_glt[0]==ed_CMN[0] and dipl_glt[1]==dipl_CMN[1] and ed_glt[1]==ed_CMN[1] and ed_glt[2]==ed_CMN[2]=="0") else []
+    return (
+        [filename, ed_glt] if not (ed_glt[0] == ed_glt[1] and ed_glt[3] == "0") else []
+    )
+
+
 def add_header_from_GLT(
     active_dom: dict, context_doms: list, projectstaff: str, role: str, **addargs
 ):
