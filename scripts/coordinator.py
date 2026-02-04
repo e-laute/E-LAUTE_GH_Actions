@@ -146,16 +146,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     if not workpackage:
         raise KeyError("Workpackage_id not found")
 
-    try:
-        print(addargs)
-        addargs_parsed = json.load(addargs)
-        if not (addargs_parsed, dict):
-            raise TypeError
-    except Exception as e:
-        raise ValueError(
-            "Addargs needs to be valid JSON with top layer in curly brackets (refer to template)"
-        ) from e
-    dic_add_args = check_addargs_against_json(addargs_parsed, workpackage)
+    dic_add_args = check_addargs_against_json(parse_addargs(addargs), workpackage)
     # hardcode 'caller-repo/' prefix to refer to caller (source) repository
     mei_path = Path("caller-repo", filepath)
     # mei_path = Path(filepath)
@@ -171,6 +162,21 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     # except Exception as e:
     #   print(f"::error::Failed to process file: {e}")
     #  return 1
+
+
+def parse_addargs(addargs: str):
+    if addargs is None:
+        return {}
+    try:
+        print(addargs)
+        addargs_parsed = json.load(addargs)
+        if not (addargs_parsed, dict):
+            raise TypeError
+    except Exception as e:
+        raise ValueError(
+            "Addargs needs to be valid JSON with top layer in curly brackets (refer to template)"
+        ) from e
+    return addargs_parsed
 
 
 def check_addargs_against_json(addargs_dic: dict, workpackage: dict):
