@@ -138,7 +138,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
 
     # TODO specify as arg
     with open(Path("shared-actions", "scripts", "work_package_example.json")) as f:
-        workpackages_list = json.loads(f)
+        workpackages_list = json.load(f)
     for candidate in workpackages_list:
         if candidate["id"] == workpackage_id:
             workpackage = candidate
@@ -169,7 +169,7 @@ def parse_addargs(addargs: str):
         return {}
     try:
         print(addargs)
-        addargs_parsed = json.load(addargs)
+        addargs_parsed = json.loads(addargs)
         if not (addargs_parsed, dict):
             raise TypeError
     except Exception as e:
