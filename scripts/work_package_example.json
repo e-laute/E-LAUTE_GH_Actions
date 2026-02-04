@@ -51,7 +51,7 @@
     "id": "compare_mnums",
     "label": "Compare number of measures",
     "description": "Compares number of measures in active and context files and prints number of measures of each file. Compares last measure number and accounts for pickup measures and invisible measures.",
-    "userFacing": true,
+    "userFacing": false,
     "params": {},
     "scripts": ["script_collection.compare_mnums"],
     "commitResult": false
