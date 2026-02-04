@@ -1,14 +1,16 @@
-[{"id": "add_sbs",
-"label":"Add system breaks",
-"description":"Adds <sb/> every n measures",
-"userFacing": true,
-"params": {
-    "sbInterval":{
+[
+  {
+    "id": "add_sbs",
+    "label": "Add system breaks",
+    "description": "Adds <sb/> every n measures",
+    "userFacing": true,
+    "params": {
+      "sbInterval": {
         "type": "Number",
         "default": 5
-    }},
-"scripts": [
-    "script_collection.add_sbs_every_n",
-    "script_collection.write_output"
+      }
+    },
+    "scripts": ["script_collection.add_sbs_every_n"],
+    "commitResult": true
+  }
 ]
-}]
