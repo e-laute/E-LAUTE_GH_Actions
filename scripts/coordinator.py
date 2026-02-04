@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from lxml import etree
+from utils import *
 
 
 def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
@@ -28,7 +29,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     except KeyError as e:
         raise KeyError("Faulty workpackage, missing 'scripts'") from e
 
-    active_dom = parse_and_wrap_dom(filepath)
+    active_dom, tree = parse_and_wrap_dom(filepath)
 
     # TODO differentiate sibling type
     context_doms = get_context_doms(filepath)
@@ -62,6 +63,11 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
                 # If it's a different kind of TypeError, re-raise it
                 raise e
 
+    if workpackage["commitResults"]:
+        edit_appInfo(active_dom, workpackage["label"])
+        with open(filepath, "wb") as f:
+            tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+
 
 def get_context_doms(filepath: Path):
     """
@@ -77,7 +83,9 @@ def get_context_doms(filepath: Path):
 
     # 2. Find files with the same extension, excluding the original file, call wrapper
     other_files = [
-        parse_and_wrap_dom(f) for f in directory.glob(f"*{extension}") if f != filepath
+        parse_and_wrap_dom(f)[0]
+        for f in directory.glob(f"*{extension}")
+        if f != filepath
     ]
 
     return other_files
@@ -95,7 +103,7 @@ def parse_and_wrap_dom(filepath: Path):
     root = tree.getroot()
     filename = filepath.stem
     notationtype = determine_notationtype(filepath)
-    return {"filename": filename, "dom": root, "notationtype": notationtype}
+    return {"filename": filename, "dom": root, "notationtype": notationtype}, tree
 
 
 def determine_notationtype(filepath: Path):
