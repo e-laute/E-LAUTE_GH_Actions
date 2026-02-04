@@ -92,7 +92,7 @@ def add_header_from_GLT(
     active_dom: dict, context_doms: list, projectstaff: str, role: str, **addargs
 ):
     """
-    template function
+    Adds header from GLT
 
     :param active_dom: dict containing {filename:str, notationtype:str, dom:etree.Element}
     :type active_dom: dict
@@ -100,6 +100,7 @@ def add_header_from_GLT(
     :type context_doms: list
     :param addargs: Addional arguments that are unused
     """
+    # TODO needs to be adjusted
 
     root = active_dom["dom"]
     for context_dom in context_doms:
@@ -109,21 +110,17 @@ def add_header_from_GLT(
     else:
         raise ValueError("add_header_from_GLT needs context_dom ed_GLT, not given")
 
-    """    
     if root.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
         namespaces=ns,
     ):
-        print(f"{active_dom["filename"]} already has header")
-        return active_dom
-    """
+        raise Exception(f"{active_dom["filename"]} already has header")
 
     if not helproot.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
         namespaces=ns,
     ):
-        print(f"{active_dom["filename"]} has no header")
-        return active_dom
+        raise Exception(f"{active_dom["filename"]} has no header")
 
     appInfo = root.find(".//mei:appInfo", namespaces=ns)
 
