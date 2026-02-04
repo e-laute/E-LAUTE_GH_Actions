@@ -128,30 +128,28 @@ def determine_notationtype(filepath: Path):
     return notationtype_re.group(1)
 
 
-def main():
+def main(workpackage_id: str, filepath: str, addargs: list):
     """
     Parses Arguments, selects file, calls coordinator on files with workpackage
     """
     # TODO misses -nt --notationtype, -e --exclude
     # For now assumes python coordinator.py filepath workpackage additional arguments
     # TODO check for validity of workpackage x filetype, multiple files
-    parser = initialize_parser()
-    args = parser.parse_args()
 
     # TODO specify as arg
     with open(Path("scripts", "work_package_example.json")) as f:
         workpackages_list = json.load(f)
     for candidate in workpackages_list:
-        if candidate["id"] == args.workpackage_id:
+        if candidate["id"] == workpackage_id:
             workpackage = candidate
             break
     if not workpackage:
         raise KeyError("Workpackage_id not found")
 
-    dic_add_args = check_addargs_against_json(addargs_to_dic(args.addargs), workpackage)
+    dic_add_args = check_addargs_against_json(addargs_to_dic(addargs), workpackage)
     # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-    # mei_path = Path("caller-repo", filepath)
-    mei_path = Path(args.filepath)
+    mei_path = Path("caller-repo", filepath)
+    # mei_path = Path(filepath)
     print(f"Checking file: {mei_path}")
     if not mei_path.is_file():
         print(f"::error::File not found: '{mei_path}'")
@@ -248,4 +246,12 @@ def initialize_parser():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = initialize_parser()
+    args = parser.parse_args()
+    sys.exit(
+        main(
+            workpackage_id=args.workpackage_id,
+            filepath=args.filepath,
+            addargs=args.addargs,
+        )
+    )
