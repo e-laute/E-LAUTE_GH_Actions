@@ -51,7 +51,7 @@ sources_table = pd.DataFrame()
 
 # TODO: implement extraction of info about sources from knowledge graph/dbrepo and not from exel-file
 sources_excel_df = pd.read_excel(
-    "scripts/upload_to_RDM/tables/sources_table.xlsx"
+    "shared-actions/scripts/upload_to_RDM/tables/sources_table.xlsx"
 )
 sources_table["source_id"] = sources_excel_df["ID"].fillna(
     sources_excel_df["Shelfmark"]
