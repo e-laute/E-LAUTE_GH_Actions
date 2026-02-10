@@ -51,9 +51,11 @@ metadata_df = pd.DataFrame()
 sources_table = pd.DataFrame()
 
 # TODO: implement extraction of info about sources from knowledge graph/dbrepo and not from exel-file
-sources_excel_df = pd.read_excel(
-    "shared-actions/scripts/upload_to_RDM/tables/sources_table.xlsx"
+sources_table_path = os.environ.get(
+    "ELAUTE_SOURCES_TABLE_PATH",
+    os.path.join(os.path.dirname(__file__), "tables", "sources_table.xlsx"),
 )
+sources_excel_df = pd.read_excel(sources_table_path)
 sources_table["source_id"] = sources_excel_df["ID"].fillna(
     sources_excel_df["Shelfmark"]
 )
