@@ -34,10 +34,23 @@ jobs:
           cache: "pip"
           cache-dependency-path: "shared-actions/scripts/requirements-release.txt"
 
-      # 4. Install python requirements and run the shared script *on the caller repo*
-      - name: Run upload_mei.py script
+      # 4. Install dependencies
+      - name: Install Python dependencies
         run: |
-          export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
           python -m pip install --upgrade pip
           pip install -r shared-actions/scripts/requirements-release.txt
-          PYTHONPATH="shared-actions/scripts" python -m upload_to_RDM.upload_meis --testing
+
+      # 5. Run release orchestration script
+      - name: Run release orchestration
+        env:
+          RDM_TEST_API_TOKEN_JJ: ${{ secrets.RDM_TEST_API_TOKEN_JJ }}
+          RELEASE_UPLOAD_MODE: testing
+        run: |
+          python shared-actions/scripts/release_steps.py \
+            --caller-repo-path "${{ github.workspace }}/caller-repo" \
+            --upload-mode "${RELEASE_UPLOAD_MODE}"
+
+      # - name: Run upload to RDM
+      #   run: |
+      #     export RDM_TEST_API_TOKEN_JJ="${{secrets.RDM_TEST_API_TOKEN_JJ}}"
+      #     PYTHONPATH="shared-actions/scripts" python -m upload_to_RDM.upload_meis --testing
