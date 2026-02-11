@@ -20,7 +20,7 @@ import validate_encodings
 
 # TODO: how to proceed with original ILT or FLT files?
 # For now, only CMN and GLT allowed because some repos contain old ILT/FLT files.
-FILENAME_PATTERN_STUB = re.compile(r"^.+_enc_(?:ed|dipl)_(?:CMN|GLT)\.mei$")
+FILENAME_PATTERN = re.compile(r"^.+_enc_(?:ed|dipl)_(?:CMN|GLT)\.mei$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,11 +46,11 @@ def resolve_caller_repo_path(
 ) -> Path:
     if caller_repo_path_arg:
         return Path(caller_repo_path_arg).resolve()
-    return (repo_root / "caller-repo").resolve()
+    return repo_root.joinpath("caller-repo").resolve()
 
 
 def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
-    exclude_file = caller_repo_path / "EXCLUDE.md"
+    exclude_file = caller_repo_path.joinpath("EXCLUDE.md")
     if not exclude_file.exists():
         print(f"[INFO] Optional exclude file not found: {exclude_file}")
         return set()
@@ -72,18 +72,17 @@ def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
         if candidate:
             excluded.add(candidate)
 
-    print(f"[INFO] Excluded IDs from EXCLUDE.md: {sorted(excluded)}")
+    print(f"[INFO] Excluded IDs from EXCLUDE.md: {len(excluded)}")
     return excluded
 
 
-def filename_matches_stub(file_name: str) -> bool:
-    """Stub regex check for filenames (replace pattern later)."""
-    return bool(FILENAME_PATTERN_STUB.match(file_name))
+def filename_matches(file_name: str) -> bool:
+    return bool(FILENAME_PATTERN.match(file_name))
 
 
-def discover_ids_and_files(
+def discover_eligible_ids(
     caller_repo_path: Path,
-) -> tuple[list[str], list[str], list[str]]:
+) -> list[str]:
     excluded_ids = parse_excluded_ids(caller_repo_path)
 
     candidate_ids = sorted(
@@ -97,27 +96,25 @@ def discover_ids_and_files(
         if folder_id not in excluded_ids
     ]
 
-    file_paths: list[str] = []
-    file_names: list[str] = []
+    matched_files_count = 0
+    invalid_files_count = 0
     for folder_id in eligible_ids:
-        folder_path = caller_repo_path / folder_id
+        folder_path = caller_repo_path.joinpath(folder_id)
         for file_path in sorted(
             p for p in folder_path.rglob("*") if p.is_file()
         ):
-            if not filename_matches_stub(file_path.name):
-                print(
-                    f"[WARN] Filename did not pass stub regex check: {file_path.name}"
-                )
+            if not filename_matches(file_path.name):
+                invalid_files_count += 1
                 continue
-            file_paths.append(str(file_path.resolve()))
-            file_names.append(file_path.name)
+            matched_files_count += 1
 
-    print("[DEBUG] Eligible IDs:")
-    print(eligible_ids)
-    print("[DEBUG] File names:")
-    print(file_names)
+    print(f"[INFO] Eligible IDs discovered: {len(eligible_ids)}")
+    print(
+        "[INFO] Source file scan complete: "
+        f"{matched_files_count} matching files, {invalid_files_count} ignored"
+    )
 
-    return eligible_ids, file_paths, file_names
+    return eligible_ids
 
 
 def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
@@ -125,7 +122,7 @@ def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
     failed_id_folders: list[str] = []
 
     for folder_id in eligible_ids:
-        id_folder = caller_repo_path / folder_id
+        id_folder = caller_repo_path.joinpath(folder_id)
         print(f"[INFO] Validating folder: {id_folder}")
         try:
             folder_valid = validate_encodings.main(str(id_folder))
@@ -170,25 +167,18 @@ def run_subprocess(
 
 def run_derive_on_id_folders(
     repo_root: Path, caller_repo_path: Path, eligible_ids: Iterable[str]
-) -> tuple[bool, list[str]]:
+) -> bool:
     print("[STEP] Derive alternate notation files started.")
-    derive_script = (
-        repo_root / "scripts" / "derive-alternate-tablature-notation-types.py"
+    derive_script = repo_root.joinpath(
+        "scripts", "derive-alternate-tablature-notation-types.py"
     )
     if not derive_script.exists():
         print(f"[ERROR] Derive script not found: {derive_script}")
-        return False, []
-
-    existing_files = {
-        str(path.resolve())
-        for folder_id in eligible_ids
-        for path in (caller_repo_path / folder_id).rglob("*")
-        if path.is_file()
-    }
+        return False
 
     failed_ids: list[str] = []
     for folder_id in eligible_ids:
-        id_folder = caller_repo_path / folder_id
+        id_folder = caller_repo_path.joinpath(folder_id)
         result = run_subprocess(
             [sys.executable, str(derive_script), str(id_folder)],
             cwd=repo_root,
@@ -200,24 +190,10 @@ def run_derive_on_id_folders(
         print("[ERROR] Derive step failed for folders:")
         for folder_id in failed_ids:
             print(f"  - {folder_id}")
-        return False, []
+        return False
 
-    all_files_after = {
-        str(path.resolve())
-        for folder_id in eligible_ids
-        for path in (caller_repo_path / folder_id).rglob("*")
-        if path.is_file()
-    }
-    generated_files = sorted(
-        file_path
-        for file_path in (all_files_after - existing_files)
-        if "/converted/" in file_path.replace("\\", "/")
-    )
-
-    print(
-        f"[STEP] Derive step completed. New generated files: {len(generated_files)}"
-    )
-    return True, generated_files
+    print("[STEP] Derive step completed.")
+    return True
 
 
 def export_generated_files_stub(generated_files: Iterable[str]) -> None:
@@ -235,16 +211,16 @@ def stage_converted_mei_files_by_id(
     staging_root = Path(tempfile.mkdtemp(prefix="elaute_release_")).resolve()
     files_by_id: dict[str, list[str]] = {}
     for folder_id in eligible_ids:
-        folder_root = caller_repo_path / folder_id
+        folder_root = caller_repo_path.joinpath(folder_id)
         converted_sources = sorted(
             path.resolve()
             for path in folder_root.rglob("*.mei")
-            if "/converted/" in str(path).replace("\\", "/")
+            if "converted" in path.parts
         )
         staged_files: list[str] = []
         for source_path in converted_sources:
             relative_path = source_path.relative_to(folder_root)
-            target_path = staging_root / folder_id / relative_path
+            target_path = staging_root.joinpath(folder_id, relative_path)
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, target_path)
             staged_files.append(str(target_path.resolve()))
@@ -263,7 +239,7 @@ def cleanup_converted_directories(
 ) -> None:
     removed_count = 0
     for folder_id in eligible_ids:
-        folder_root = caller_repo_path / folder_id
+        folder_root = caller_repo_path.joinpath(folder_id)
         for converted_dir in sorted(
             path for path in folder_root.rglob("converted") if path.is_dir()
         ):
@@ -293,7 +269,7 @@ def run_upload_on_id_folders(
         base_env["PYTHONPATH"] = str(scripts_path)
 
     for folder_id in eligible_ids:
-        id_folder = workspace_root_for_upload / folder_id
+        id_folder = workspace_root_for_upload.joinpath(folder_id)
         selected_files = sorted(set(converted_files_by_id.get(folder_id, [])))
         if not selected_files:
             print(
@@ -356,9 +332,7 @@ def main() -> int:
         print(f"[ERROR] Caller repo path not found: {caller_repo_path}")
         return 1
 
-    eligible_ids, file_paths, file_names = discover_ids_and_files(
-        caller_repo_path
-    )
+    eligible_ids = discover_eligible_ids(caller_repo_path)
     if not eligible_ids:
         print("[WARN] No eligible ID folders found. Nothing to process.")
         return 0
@@ -368,7 +342,7 @@ def main() -> int:
         print("[ERROR] Release process stopped due to validation errors.")
         return 1
 
-    derive_ok, generated_files = run_derive_on_id_folders(
+    derive_ok = run_derive_on_id_folders(
         repo_root, caller_repo_path, eligible_ids
     )
     if not derive_ok:
@@ -383,14 +357,11 @@ def main() -> int:
         for folder_id in eligible_ids
         for file_path in converted_files_by_id.get(folder_id, [])
     ]
-    file_paths = converted_files
-    file_names = [Path(path).name for path in converted_files]
-    print("[DEBUG] Updated file names (including derived files):")
-    print(file_names)
+    print(f"[INFO] Converted files prepared for upload: {len(converted_files)}")
 
     cleanup_converted_directories(caller_repo_path, eligible_ids)
 
-    export_generated_files_stub(file_paths)
+    export_generated_files_stub(converted_files)
 
     try:
         upload_ok = run_upload_on_id_folders(
