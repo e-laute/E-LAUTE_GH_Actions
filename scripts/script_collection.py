@@ -33,14 +33,11 @@ def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **add
 
     measures = root.xpath(".//mei:measure", namespaces=ns)
 
-    count = sbInterval
-    for measure in measures:
-        if count == 5:
+    for count, measure in enumerate(measures):
+        if (count + 1) % sbInterval == 0:
             sb = etree.Element("sb")
             parent = measure.getparent()
             parent.insert(parent.index(measure) + 1, sb)
-        else:
-            count += 1
 
     active_dom["dom"] = root
     return active_dom
