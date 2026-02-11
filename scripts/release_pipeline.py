@@ -21,6 +21,7 @@ import validate_encodings
 # TODO: how to proceed with original ILT or FLT files?
 # For now, only CMN and GLT allowed because some repos contain old ILT/FLT files.
 FILENAME_PATTERN = re.compile(r"^.+_enc_(?:ed|dipl)_(?:CMN|GLT)\.mei$")
+WORK_ID_PATTERN = re.compile(r"^(.+_n\d+)")
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,8 +73,22 @@ def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
         if candidate:
             excluded.add(candidate)
 
-    print(f"[INFO] Excluded IDs from EXCLUDE.md: {len(excluded)}")
+    print(f"[INFO] Excluded work_ids from EXCLUDE.md: {len(excluded)}")
     return excluded
+
+
+def get_work_id_from_filename(file_name: str) -> str:
+    """
+    Derive a work_id from an MEI filename.
+    Example: Jud_1523-2_n10_18v_enc_dipl_GLT.mei -> Jud_1523-2_n10
+    """
+    base_name = file_name.removesuffix(".mei")
+    match = WORK_ID_PATTERN.match(base_name)
+    if match:
+        return match.group(1)
+    if "_" in base_name:
+        return base_name.rsplit("_", 1)[0]
+    return base_name
 
 
 def filename_matches(file_name: str) -> bool:
@@ -83,18 +98,12 @@ def filename_matches(file_name: str) -> bool:
 def discover_eligible_ids(
     caller_repo_path: Path,
 ) -> list[str]:
-    excluded_ids = parse_excluded_ids(caller_repo_path)
-
     candidate_ids = sorted(
         folder.name
         for folder in caller_repo_path.iterdir()
         if folder.is_dir() and not folder.name.startswith(".")
     )
-    eligible_ids = [
-        folder_id
-        for folder_id in candidate_ids
-        if folder_id not in excluded_ids
-    ]
+    eligible_ids = candidate_ids
 
     matched_files_count = 0
     invalid_files_count = 0
@@ -206,10 +215,13 @@ def export_generated_files_stub(generated_files: Iterable[str]) -> None:
 
 
 def stage_converted_mei_files_by_id(
-    caller_repo_path: Path, eligible_ids: Iterable[str]
+    caller_repo_path: Path,
+    eligible_ids: Iterable[str],
+    excluded_ids: set[str],
 ) -> tuple[Path, dict[str, list[str]]]:
     staging_root = Path(tempfile.mkdtemp(prefix="elaute_release_")).resolve()
     files_by_id: dict[str, list[str]] = {}
+    excluded_files_count = 0
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
         converted_sources = sorted(
@@ -219,6 +231,10 @@ def stage_converted_mei_files_by_id(
         )
         staged_files: list[str] = []
         for source_path in converted_sources:
+            work_id = get_work_id_from_filename(source_path.name)
+            if work_id in excluded_ids:
+                excluded_files_count += 1
+                continue
             relative_path = source_path.relative_to(folder_root)
             target_path = staging_root.joinpath(folder_id, relative_path)
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +245,11 @@ def stage_converted_mei_files_by_id(
         print(
             f"[INFO] Converted MEI files prepared for upload ({folder_id}): "
             f"{len(staged_files)}"
+        )
+    if excluded_files_count > 0:
+        print(
+            "[INFO] Converted MEI files excluded by EXCLUDE.md: "
+            f"{excluded_files_count}"
         )
     print(f"[INFO] Staging root for converted files: {staging_root}")
     return staging_root, files_by_id
@@ -332,6 +353,7 @@ def main() -> int:
         print(f"[ERROR] Caller repo path not found: {caller_repo_path}")
         return 1
 
+    excluded_ids = parse_excluded_ids(caller_repo_path)
     eligible_ids = discover_eligible_ids(caller_repo_path)
     if not eligible_ids:
         print("[WARN] No eligible ID folders found. Nothing to process.")
@@ -350,7 +372,7 @@ def main() -> int:
         return 1
 
     staging_root, converted_files_by_id = stage_converted_mei_files_by_id(
-        caller_repo_path, eligible_ids
+        caller_repo_path, eligible_ids, excluded_ids
     )
     converted_files = [
         file_path
