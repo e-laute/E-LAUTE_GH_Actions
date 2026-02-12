@@ -191,8 +191,8 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
             if ident.get("scheme") == "other":
                 elaute_id = ident.get("identifier")
                 break
-        if not elaute_id:
-            print(f"Unknown E-LAUTE ID for record {record_id}")
+        # if not elaute_id:
+        # print(f"Unknown E-LAUTE ID for record {record_id}")
         records.append(
             {
                 "elaute_id": elaute_id,
@@ -273,8 +273,9 @@ def upload_to_rdm(
         record_id = r.json()["id"]
         print(links)
 
-    # Upload each file individually (legacy behavior)
-    i = 0
+    # Upload each file individually.
+    # Resolve file links by key (filename), not by index, because API entry order
+    # is not guaranteed to match request order.
     for file_path in file_paths:
         filename = os.path.basename(file_path)
         r = requests.post(
@@ -282,11 +283,26 @@ def upload_to_rdm(
             data=json.dumps([{"key": filename}]),
             headers=h,
         )
-        assert (
-            r.status_code == 201
-        ), f"Failed to initialize file {filename} (code: {r.status_code})"
-        file_links = r.json()["entries"][i]["links"]
-        i += 1
+        assert r.status_code == 201, (
+            f"Failed to initialize file {filename} (code: {r.status_code}) "
+            f"response: {r.text[:300]}"
+        )
+
+        entries = r.json().get("entries", [])
+        file_entry = next(
+            (entry for entry in entries if entry.get("key") == filename),
+            None,
+        )
+        if file_entry is None and len(entries) == 1:
+            # Backward-compatibility for older payload shapes.
+            file_entry = entries[0]
+        assert file_entry is not None, (
+            f"Failed to locate initialized entry for {filename} in response."
+        )
+        file_links = file_entry.get("links", {})
+        assert "content" in file_links and "commit" in file_links, (
+            f"Missing upload/commit links for {filename}."
+        )
 
         # Upload file content by streaming the data
         with open(file_path, "rb") as fp:
@@ -299,11 +315,12 @@ def upload_to_rdm(
             r.status_code == 200
         ), f"Failed to upload file content {filename} (code: {r.status_code})"
 
-        # Commit the file
+        # Commit the file.
         r = requests.post(file_links["commit"], headers=h)
-        assert (
-            r.status_code == 200
-        ), f"Failed to commit file {filename} (code: {r.status_code})"
+        assert r.status_code == 200, (
+            f"Failed to commit file {filename} (code: {r.status_code}) "
+            f"response: {r.text[:300]}"
+        )
 
     # Add to E-LAUTE community review (new records only).
     if new_upload:
