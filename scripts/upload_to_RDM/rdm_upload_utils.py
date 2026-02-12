@@ -7,11 +7,14 @@ import os
 import json
 import hashlib
 import argparse
-import time
 
 import pandas as pd
 
 # from pathlib import Path
+REQUEST_TIMEOUT = (10, 45)
+COMMIT_RETRIES = 3
+VERIFY_ATTEMPTS = 2
+WORKFLOW_RETRIES = 4
 
 
 def get_id_from_api(url):
@@ -170,6 +173,7 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
     response = requests.get(
         f"{RDM_API_URL}/communities/{ELAUTE_COMMUNITY_ID}/records",
         headers=h,
+        timeout=REQUEST_TIMEOUT,
     )
 
     if not response.status_code == 200:
@@ -224,10 +228,47 @@ def upload_to_rdm(
 
     print("record_id:", record_id)
 
+    def response_excerpt(resp, limit=400):
+        text = (resp.text or "").strip().replace("\n", " ")
+        return text[:limit]
+
+    def post_with_retries(url, headers, data=None, expected_status=200, label="request"):
+        last_response = None
+        for attempt in range(1, WORKFLOW_RETRIES + 1):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    data=data,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                last_response = response
+                if response.status_code == expected_status:
+                    return response
+                if response.status_code in {502, 503, 504}:
+                    print(
+                        f"[WARN] {label} transient failure "
+                        f"(attempt {attempt}/{WORKFLOW_RETRIES}, code: {response.status_code})."
+                    )
+                    if attempt < WORKFLOW_RETRIES:
+                        continue
+                return response
+            except requests.RequestException as exc:
+                print(
+                    f"[WARN] {label} request exception "
+                    f"(attempt {attempt}/{WORKFLOW_RETRIES}): {exc}"
+                )
+                if attempt < WORKFLOW_RETRIES:
+                    continue
+                raise
+        return last_response
+
     if not new_upload:
         # Create a new version/draft for the record
         r = requests.post(
-            f"{RDM_API_URL}/records/{record_id}/versions", headers=h
+            f"{RDM_API_URL}/records/{record_id}/versions",
+            headers=h,
+            timeout=REQUEST_TIMEOUT,
         )
         if r.status_code != 201:
             print(
@@ -245,6 +286,7 @@ def upload_to_rdm(
             f"{RDM_API_URL}/records/{new_record_id}/draft",
             data=json.dumps(metadata),
             headers=h,
+            timeout=REQUEST_TIMEOUT,
         )
         if r.status_code != 200:
             print(
@@ -262,7 +304,10 @@ def upload_to_rdm(
     else:
         # Create new draft record
         r = requests.post(
-            f"{RDM_API_URL}/records", data=json.dumps(metadata), headers=h
+            f"{RDM_API_URL}/records",
+            data=json.dumps(metadata),
+            headers=h,
+            timeout=REQUEST_TIMEOUT,
         )
         assert (
             r.status_code == 201
@@ -274,7 +319,9 @@ def upload_to_rdm(
     # Upload each file with its own init/upload/commit lifecycle.
     file_keys = [os.path.basename(file_path) for file_path in file_paths]
     if len(file_keys) != len(set(file_keys)):
-        duplicates = sorted({key for key in file_keys if file_keys.count(key) > 1})
+        duplicates = sorted(
+            {key for key in file_keys if file_keys.count(key) > 1}
+        )
         raise AssertionError(
             "Duplicate filenames in upload payload are not allowed: "
             + ", ".join(duplicates)
@@ -285,13 +332,18 @@ def upload_to_rdm(
             links["files"],
             data=json.dumps([{"key": filename}]),
             headers=h,
+            timeout=REQUEST_TIMEOUT,
         )
         assert (
             r.status_code == 201
         ), f"Failed to initialize file {filename} (code: {r.status_code})"
         response_entries = r.json().get("entries", [])
         selected_entry = next(
-            (entry for entry in response_entries if entry.get("key") == filename),
+            (
+                entry
+                for entry in response_entries
+                if entry.get("key") == filename
+            ),
             None,
         )
         if selected_entry is None and response_entries:
@@ -303,7 +355,12 @@ def upload_to_rdm(
 
         # Upload file content by streaming the data
         with open(file_path, "rb") as fp:
-            r = requests.put(file_links["content"], data=fp, headers=fh)
+            r = requests.put(
+                file_links["content"],
+                data=fp,
+                headers=fh,
+                timeout=REQUEST_TIMEOUT,
+            )
         assert (
             r.status_code == 200
         ), f"Failed to upload file content {filename} (code: {r.status_code})"
@@ -311,19 +368,24 @@ def upload_to_rdm(
         # Commit the file (retry transient 5xx errors).
         commit_ok = False
         last_commit_code = None
-        for attempt in range(1, 4):
-            r = requests.post(file_links["commit"], headers=h)
+        for attempt in range(1, COMMIT_RETRIES + 1):
+            r = requests.post(
+                file_links["commit"],
+                headers=h,
+                timeout=REQUEST_TIMEOUT,
+            )
             last_commit_code = r.status_code
             if r.status_code == 200:
                 commit_ok = True
                 break
             if r.status_code >= 500:
-                time.sleep(2)
                 continue
             break
-        assert commit_ok, (
-            f"Failed to commit file {filename} (code: {last_commit_code})"
-        )
+        if not commit_ok:
+            raise AssertionError(
+                f"Failed to commit file {filename} (code: {last_commit_code}, "
+                f"response: {response_excerpt(r)})"
+            )
         print(
             f"[INFO] Uploaded file {idx}/{len(file_paths)} for {elaute_id}: {filename}"
         )
@@ -331,14 +393,17 @@ def upload_to_rdm(
     # Verify all expected files are completed before review/publish.
     expected_keys = set(file_keys)
     verified = False
-    for attempt in range(1, 7):
-        r = requests.get(links["files"], headers=h)
+    for attempt in range(1, VERIFY_ATTEMPTS + 1):
+        r = requests.get(
+            links["files"],
+            headers=h,
+            timeout=REQUEST_TIMEOUT,
+        )
         if r.status_code != 200:
             print(
                 f"[WARN] Could not list draft files for verification "
                 f"(attempt {attempt}, code: {r.status_code})."
             )
-            time.sleep(2)
             continue
 
         entries = r.json().get("entries", [])
@@ -355,11 +420,10 @@ def upload_to_rdm(
         if not missing_keys:
             verified = True
             break
-        if attempt < 6:
+        if attempt < VERIFY_ATTEMPTS:
             print(
                 f"[WARN] Waiting for pending files before review: {missing_keys}"
             )
-            time.sleep(2)
 
     if not verified:
         print(
@@ -381,10 +445,16 @@ def upload_to_rdm(
                         "type": "community-submission",
                     }
                 ),
+                timeout=REQUEST_TIMEOUT,
             )
-            assert (
-                r.status_code == 200
-            ), f"Failed to set review for record {record_id} (code: {r.status_code})"
+            if r.status_code != 200:
+                print(
+                    "Failed to set review for record "
+                    f"{record_id} (code: {r.status_code}, "
+                    f"response: {response_excerpt(r)})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
         else:
             print(
                 "Warning: ELAUTE_COMMUNITY_ID not set, skipping community submission"
@@ -392,23 +462,35 @@ def upload_to_rdm(
 
     # Create curation request (new records only).
     if new_upload:
-        r = requests.post(
-            f"{RDM_API_URL}/curations",
+        r = post_with_retries(
+            url=f"{RDM_API_URL}/curations",
             headers=h,
             data=json.dumps({"topic": {"record": record_id}}),
+            expected_status=201,
+            label=f"create curation for {record_id}",
         )
-        assert (
-            r.status_code == 201
-        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
+        if r.status_code != 201:
+            print(
+                "Failed to create curation for record "
+                f"{record_id} (code: {r.status_code}, "
+                f"response: {response_excerpt(r)})"
+            )
+            print(
+                "[WARN] Continuing with submit-review despite curation failure."
+            )
 
     # Submit draft for review (all records).
-    r = requests.post(
-        f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
+    r = post_with_retries(
+        url=f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
         headers=h,
+        expected_status=202,
+        label=f"submit-review for {record_id}",
     )
     if r.status_code != 202:
         print(
-            f"Failed to submit review for record {record_id} (code: {r.status_code})"
+            "Failed to submit review for record "
+            f"{record_id} (code: {r.status_code}, "
+            f"response: {response_excerpt(r)})"
         )
         failed_uploads.append(elaute_id)
         return failed_uploads
