@@ -18,6 +18,7 @@ python -m upload_to_RDM.upload_meis --production
 import pandas as pd
 import os
 import shutil
+import sys
 import tempfile
 import zipfile
 from lxml import etree
@@ -929,9 +930,6 @@ def upload_mei_files(work_ids):
         print("No work_ids found.")
         return
 
-    # HTTP Headers
-    h, fh = set_headers(RDM_API_TOKEN)
-
     for work_id in work_ids:
         print(f"\n--- Processing work_id: {work_id} ---")
 
@@ -995,7 +993,7 @@ def upload_mei_files(work_ids):
     return failed_uploads
 
 
-def main():
+def main() -> int:
     """
     Main function - choose between testing extraction, uploading files, or updating records.
     """
@@ -1016,13 +1014,20 @@ def main():
     get_candidate_upload_files()
 
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
+    has_failures = False
 
     if len(new_work_ids) > 0:
-        upload_mei_files(new_work_ids)
+        failed_uploads = upload_mei_files(new_work_ids)
+        if failed_uploads:
+            has_failures = True
 
     if len(existing_work_ids) > 0:
-        update_records_in_RDM(existing_work_ids)
+        _updated_records, failed_updates = update_records_in_RDM(existing_work_ids)
+        if failed_updates:
+            has_failures = True
+
+    return 1 if has_failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

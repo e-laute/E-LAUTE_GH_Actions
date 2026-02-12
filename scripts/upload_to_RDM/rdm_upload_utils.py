@@ -271,7 +271,7 @@ def upload_to_rdm(
         record_id = r.json()["id"]
         print(links)
 
-    # Initialize all file keys once, then upload each file separately.
+    # Upload each file with its own init/upload/commit lifecycle.
     file_keys = [os.path.basename(file_path) for file_path in file_paths]
     if len(file_keys) != len(set(file_keys)):
         duplicates = sorted({key for key in file_keys if file_keys.count(key) > 1})
@@ -279,25 +279,26 @@ def upload_to_rdm(
             "Duplicate filenames in upload payload are not allowed: "
             + ", ".join(duplicates)
         )
-    init_payload = [{"key": key} for key in file_keys]
-    r = requests.post(links["files"], data=json.dumps(init_payload), headers=h)
-    assert (
-        r.status_code == 201
-    ), f"Failed to initialize files for {elaute_id} (code: {r.status_code})"
-    response_entries = r.json().get("entries", [])
-    entries_by_key = {
-        entry.get("key"): entry
-        for entry in response_entries
-        if entry.get("key") is not None
-    }
-
     for idx, file_path in enumerate(file_paths, start=1):
         filename = os.path.basename(file_path)
-        selected_entry = entries_by_key.get(filename)
-        assert selected_entry is not None, (
-            f"No initialized file entry returned for '{filename}'. "
-            f"Initialized keys: {sorted(entries_by_key.keys())}"
+        r = requests.post(
+            links["files"],
+            data=json.dumps([{"key": filename}]),
+            headers=h,
         )
+        assert (
+            r.status_code == 201
+        ), f"Failed to initialize file {filename} (code: {r.status_code})"
+        response_entries = r.json().get("entries", [])
+        selected_entry = next(
+            (entry for entry in response_entries if entry.get("key") == filename),
+            None,
+        )
+        if selected_entry is None and response_entries:
+            selected_entry = response_entries[-1]
+        assert (
+            selected_entry is not None
+        ), f"No initialized file entry returned for '{filename}'."
         file_links = selected_entry["links"]
 
         # Upload file content by streaming the data
@@ -307,11 +308,22 @@ def upload_to_rdm(
             r.status_code == 200
         ), f"Failed to upload file content {filename} (code: {r.status_code})"
 
-        # Commit the file
-        r = requests.post(file_links["commit"], headers=h)
-        assert (
-            r.status_code == 200
-        ), f"Failed to commit file {filename} (code: {r.status_code})"
+        # Commit the file (retry transient 5xx errors).
+        commit_ok = False
+        last_commit_code = None
+        for attempt in range(1, 4):
+            r = requests.post(file_links["commit"], headers=h)
+            last_commit_code = r.status_code
+            if r.status_code == 200:
+                commit_ok = True
+                break
+            if r.status_code >= 500:
+                time.sleep(2)
+                continue
+            break
+        assert commit_ok, (
+            f"Failed to commit file {filename} (code: {last_commit_code})"
+        )
         print(
             f"[INFO] Uploaded file {idx}/{len(file_paths)} for {elaute_id}: {filename}"
         )
