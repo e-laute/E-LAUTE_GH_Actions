@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from typing import Iterable
 
 from rdflib import Graph, Namespace, URIRef, Literal, BNode
 from rdflib.namespace import RDF, DCTERMS, FOAF, XSD
@@ -716,6 +717,45 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
     return g
 
 
+def build_provenance_for_mei_file(
+    mei_file: Path | str, ttl_output: Path | str | None = None
+) -> Path:
+    """
+    Build provenance graph for one MEI file and write Turtle output.
+
+    If ttl_output is omitted, writes to:
+      <mei_parent>/<mei_stem>_provenance.ttl
+    """
+    mei_path = Path(mei_file).resolve()
+    if not mei_path.is_file():
+        raise FileNotFoundError(f"MEI file not found: {mei_path}")
+
+    output_path = (
+        Path(ttl_output).resolve()
+        if ttl_output is not None
+        else mei_path.with_name(f"{mei_path.stem}_provenance.ttl")
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    head = parse_mei_head(mei_path)
+    graph = build_graph_from_head(head, mei_path)
+    graph.serialize(destination=str(output_path), format="turtle")
+    return output_path
+
+
+def generate_provenance_for_mei_files(
+    mei_files: Iterable[Path | str],
+) -> list[Path]:
+    """
+    Generate provenance Turtle files for multiple MEI files.
+    Returns the list of written TTL file paths.
+    """
+    written: list[Path] = []
+    for mei_file in mei_files:
+        written.append(build_provenance_for_mei_file(mei_file))
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract MEI header metadata to PROV-O RDF (rdflib refactor)"
@@ -735,12 +775,14 @@ def main() -> int:
         return 2
 
     try:
-        head = parse_mei_head(mei_path)
-        graph = build_graph_from_head(head, mei_path)
         if args.ttl_output:
-            graph.serialize(destination=args.ttl_output, format="turtle")
-            print(f"📝 RDF written to {args.ttl_output}")
+            output_path = build_provenance_for_mei_file(
+                mei_path, args.ttl_output
+            )
+            print(f"RDF written to {output_path}")
         else:
+            head = parse_mei_head(mei_path)
+            graph = build_graph_from_head(head, mei_path)
             ttl = graph.serialize(format="turtle")
             # rdflib returns str in recent versions
             print(ttl)
