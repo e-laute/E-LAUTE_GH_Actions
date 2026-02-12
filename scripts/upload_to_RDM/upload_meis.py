@@ -362,7 +362,9 @@ def prepare_upload_file_paths(work_id, upload_file_paths):
 
     temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
     safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
-    zip_path = os.path.join(temp_dir, f"{safe_work_id}_provenance_ttl.zip")
+    zip_path = os.path.join(
+        temp_dir, f"{safe_work_id}_provenance_files.zip"
+    )
 
     with zipfile.ZipFile(
         zip_path, mode="w", compression=zipfile.ZIP_DEFLATED

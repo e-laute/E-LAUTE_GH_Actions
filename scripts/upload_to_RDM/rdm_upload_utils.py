@@ -367,7 +367,7 @@ def upload_to_rdm(
         return failed_uploads
 
     print(
-        "[INFO] Draft upload complete and submitted for review; publish skipped for manual approval. "
+        "[INFO] Draft upload complete and submitted for review; publish skipped. "
         f"Draft: {RDM_API_URL}/uploads/{record_id}"
     )
 
