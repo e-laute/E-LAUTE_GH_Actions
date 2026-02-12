@@ -1,6 +1,9 @@
 """
 Release orchestration script for the upload of MEI files to the TU-RDM platform in the E-LAUTE GitHub Actions workflow.
 
+TODO: add provenance generation
+    - auch ins RDM speichern? als Teil vom Source-Datensatz
+
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Iterable
 
+import generate_provenance
 import validate_encodings
 
 
@@ -72,9 +76,37 @@ def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
         candidate = candidate.strip("`").strip(",;")
         if candidate:
             excluded.add(candidate)
+            excluded.add(get_full_id_from_identifier(candidate))
+            excluded.add(get_work_id_from_identifier(candidate))
 
     print(f"[INFO] Excluded work_ids from EXCLUDE.md: {len(excluded)}")
     return excluded
+
+
+def get_work_id_from_identifier(identifier: str) -> str:
+    """
+    Derive a short work_id token from an identifier.
+    For filenames, first strip everything after '_enc_' and then apply
+    the legacy pattern up to '_n<digits>' (needed for id_table.xlsx keys).
+    """
+    token = get_full_id_from_identifier(identifier)
+    match = WORK_ID_PATTERN.match(token)
+    if match:
+        return match.group(1)
+    return token
+
+
+def get_full_id_from_identifier(identifier: str) -> str:
+    """
+    Derive a full identifier token.
+    For filenames, this is everything before '_enc_'.
+    """
+    token = identifier.strip().strip("`").strip(",;")
+    if token.endswith(".mei"):
+        token = token.removesuffix(".mei")
+    if "_enc_" in token:
+        return token.split("_enc_", maxsplit=1)[0]
+    return token
 
 
 def get_work_id_from_filename(file_name: str) -> str:
@@ -83,12 +115,7 @@ def get_work_id_from_filename(file_name: str) -> str:
     Example: Jud_1523-2_n10_18v_enc_dipl_GLT.mei -> Jud_1523-2_n10
     """
     base_name = file_name.removesuffix(".mei")
-    match = WORK_ID_PATTERN.match(base_name)
-    if match:
-        return match.group(1)
-    if "_" in base_name:
-        return base_name.rsplit("_", 1)[0]
-    return base_name
+    return get_work_id_from_identifier(base_name)
 
 
 def filename_matches(file_name: str) -> bool:
@@ -97,13 +124,21 @@ def filename_matches(file_name: str) -> bool:
 
 def discover_eligible_ids(
     caller_repo_path: Path,
+    excluded_ids: set[str],
 ) -> list[str]:
     candidate_ids = sorted(
         folder.name
         for folder in caller_repo_path.iterdir()
         if folder.is_dir() and not folder.name.startswith(".")
     )
-    eligible_ids = candidate_ids
+    eligible_ids: list[str] = []
+    excluded_folder_count = 0
+    for folder_id in candidate_ids:
+        folder_work_id = get_work_id_from_identifier(folder_id)
+        if folder_id in excluded_ids or folder_work_id in excluded_ids:
+            excluded_folder_count += 1
+            continue
+        eligible_ids.append(folder_id)
 
     matched_files_count = 0
     invalid_files_count = 0
@@ -118,6 +153,11 @@ def discover_eligible_ids(
             matched_files_count += 1
 
     print(f"[INFO] Eligible IDs discovered: {len(eligible_ids)}")
+    if excluded_folder_count > 0:
+        print(
+            "[INFO] ID folders excluded by EXCLUDE.md: "
+            f"{excluded_folder_count}"
+        )
     print(
         "[INFO] Source file scan complete: "
         f"{matched_files_count} matching files, {invalid_files_count} ignored"
@@ -205,6 +245,49 @@ def run_derive_on_id_folders(
     return True
 
 
+def run_provenance_on_converted_mei_files(
+    caller_repo_path: Path, eligible_ids: Iterable[str], excluded_ids: set[str]
+) -> bool:
+    print("[STEP] Provenance generation for converted MEI files started.")
+    failed_files: list[str] = []
+    generated_count = 0
+
+    for folder_id in eligible_ids:
+        folder_root = caller_repo_path.joinpath(folder_id)
+        converted_mei_files = sorted(
+            path.resolve()
+            for path in folder_root.rglob("*.mei")
+            if "converted" in path.parts
+        )
+        for mei_path in converted_mei_files:
+            work_id = get_work_id_from_filename(mei_path.name)
+            if work_id in excluded_ids:
+                continue
+            try:
+                output_path = generate_provenance.build_provenance_for_mei_file(
+                    mei_path
+                )
+                generated_count += 1
+                print(f"[INFO] Generated provenance: {output_path}")
+            except Exception as exc:  # noqa: BLE001
+                failed_files.append(str(mei_path))
+                print(
+                    f"[ERROR] Failed provenance generation for {mei_path}: {exc}"
+                )
+
+    if failed_files:
+        print("[ERROR] Provenance generation failed for files:")
+        for file_path in failed_files:
+            print(f"  - {file_path}")
+        return False
+
+    print(
+        "[STEP] Provenance generation completed. "
+        f"TTL files created: {generated_count}"
+    )
+    return True
+
+
 def export_generated_files_stub(generated_files: Iterable[str]) -> None:
     print(
         "[TODO] Export generated files to external target repository (not caller-repo)."
@@ -226,8 +309,10 @@ def stage_converted_mei_files_by_id(
         folder_root = caller_repo_path.joinpath(folder_id)
         converted_sources = sorted(
             path.resolve()
-            for path in folder_root.rglob("*.mei")
+            for path in folder_root.rglob("*")
+            if path.is_file()
             if "converted" in path.parts
+            and path.suffix.lower() in {".mei", ".ttl"}
         )
         staged_files: list[str] = []
         for source_path in converted_sources:
@@ -243,15 +328,15 @@ def stage_converted_mei_files_by_id(
 
         files_by_id[folder_id] = staged_files
         print(
-            f"[INFO] Converted MEI files prepared for upload ({folder_id}): "
+            f"[INFO] Converted files prepared for upload ({folder_id}): "
             f"{len(staged_files)}"
         )
     if excluded_files_count > 0:
         print(
-            "[INFO] Converted MEI files excluded by EXCLUDE.md: "
+            "[INFO] Converted files excluded by EXCLUDE.md: "
             f"{excluded_files_count}"
         )
-    print(f"[INFO] Staging root for converted files: {staging_root}")
+    print(f"[INFO] Staging root for converted upload files: {staging_root}")
     return staging_root, files_by_id
 
 
@@ -354,7 +439,7 @@ def main() -> int:
         return 1
 
     excluded_ids = parse_excluded_ids(caller_repo_path)
-    eligible_ids = discover_eligible_ids(caller_repo_path)
+    eligible_ids = discover_eligible_ids(caller_repo_path, excluded_ids)
     if not eligible_ids:
         print("[WARN] No eligible ID folders found. Nothing to process.")
         return 0
@@ -369,6 +454,15 @@ def main() -> int:
     )
     if not derive_ok:
         print("[ERROR] Release process stopped due to derive step errors.")
+        return 1
+
+    provenance_ok = run_provenance_on_converted_mei_files(
+        caller_repo_path, eligible_ids, excluded_ids
+    )
+    if not provenance_ok:
+        print(
+            "[ERROR] Release process stopped due to provenance generation errors."
+        )
         return 1
 
     staging_root, converted_files_by_id = stage_converted_mei_files_by_id(
