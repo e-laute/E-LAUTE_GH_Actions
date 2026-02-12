@@ -33,14 +33,11 @@ def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **add
 
     measures = root.xpath(".//mei:measure", namespaces=ns)
 
-    count = sbInterval
-    for measure in measures:
-        if count == 5:
+    for count, measure in enumerate(measures):
+        if (count + 1) % sbInterval == 0:
             sb = etree.Element("sb")
             parent = measure.getparent()
             parent.insert(parent.index(measure) + 1, sb)
-        else:
-            count += 1
 
     active_dom["dom"] = root
     return active_dom
@@ -125,8 +122,10 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     else:
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
-    print("File\tdi_GLT\tdi_CMN\ted_GLT\t\ted_CMN")
-    print("\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list]))
+    write_to_github_step("File\tdi_GLT\tdi_CMN\ted_GLT\t\ted_CMN")
+    write_to_github_step(
+        "\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list])
+    )
 
     return active_dom
 
