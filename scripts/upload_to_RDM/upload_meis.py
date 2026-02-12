@@ -272,9 +272,7 @@ def load_selected_upload_files_from_env():
         return None
 
     if not os.path.exists(manifest_path):
-        raise FileNotFoundError(
-            f"Upload manifest not found: {manifest_path}"
-        )
+        raise FileNotFoundError(f"Upload manifest not found: {manifest_path}")
 
     selected_files = []
     with open(manifest_path, "r", encoding="utf-8") as manifest:
@@ -283,19 +281,20 @@ def load_selected_upload_files_from_env():
             if not line:
                 continue
             file_path = os.path.abspath(line)
-            if os.path.isfile(file_path) and file_path.endswith(".mei"):
+            if os.path.isfile(file_path):
                 selected_files.append(file_path)
 
     # Preserve stable order but remove duplicates
     return list(dict.fromkeys(selected_files))
 
 
-def get_candidate_mei_files():
+def get_candidate_upload_files():
     """
-    Return the exact list of MEI files to process.
+    Return the exact list of files to upload.
     Priority:
       1) explicit manifest file list (ELAUTE_UPLOAD_FILE_LIST)
-      2) FILES_PATH scan, optionally restricted to converted folders
+      2) FILES_PATH scan, optionally restricted to converted folders.
+    Includes MEI and provenance Turtle files.
     """
     global SELECTED_UPLOAD_FILES
     if SELECTED_UPLOAD_FILES is not None:
@@ -303,7 +302,11 @@ def get_candidate_mei_files():
 
     selected_from_manifest = load_selected_upload_files_from_env()
     if selected_from_manifest is not None:
-        SELECTED_UPLOAD_FILES = selected_from_manifest
+        SELECTED_UPLOAD_FILES = [
+            file_path
+            for file_path in selected_from_manifest
+            if file_path.lower().endswith((".mei", ".ttl"))
+        ]
         print(
             f"[INFO] Using explicit upload manifest with "
             f"{len(SELECTED_UPLOAD_FILES)} files."
@@ -314,7 +317,7 @@ def get_candidate_mei_files():
     files = []
     for root, dirs, filenames in os.walk(FILES_PATH):
         for file in filenames:
-            if not file.endswith(".mei"):
+            if not file.lower().endswith((".mei", ".ttl")):
                 continue
             full_path = os.path.abspath(os.path.join(root, file))
             normalized = full_path.replace("\\", "/")
@@ -323,37 +326,60 @@ def get_candidate_mei_files():
             files.append(full_path)
 
     SELECTED_UPLOAD_FILES = list(dict.fromkeys(sorted(files)))
-    print(f"[INFO] Candidate upload MEI files: {len(SELECTED_UPLOAD_FILES)}")
+    print(f"[INFO] Candidate upload files: {len(SELECTED_UPLOAD_FILES)}")
     return SELECTED_UPLOAD_FILES
+
+
+def get_candidate_mei_files():
+    """Return only MEI files from current upload candidates."""
+    return [
+        file_path
+        for file_path in get_candidate_upload_files()
+        if file_path.lower().endswith(".mei")
+    ]
+
+
+def get_full_id_from_filename(file_name: str) -> str:
+    """
+    Return everything before '_enc_' (without extension) if present.
+    """
+    base_name = os.path.splitext(file_name)[0]
+    if "_enc_" in base_name:
+        return base_name.split("_enc_", maxsplit=1)[0]
+    return base_name
+
+
+def get_short_work_id_for_lookup(identifier: str) -> str:
+    """
+    Legacy short work_id used for lookups (e.g. id_table keys): ..._n<digits>.
+    Falls back to the full identifier when no '_n<digits>' part exists.
+    """
+    match = re.match(r"^(.+_n\d+)", identifier)
+    if match:
+        return match.group(1)
+    return identifier
+
+
+def get_work_id_from_filename_for_lookup(file_name: str) -> str:
+    """
+    Derive lookup work_id from filename:
+    1) cut at '_enc_'
+    2) shorten to legacy ..._n<digits> form
+    """
+    full_id = get_full_id_from_filename(file_name)
+    return get_short_work_id_for_lookup(full_id)
 
 
 def get_work_ids_from_files():
     """
-    Scan all folders in FILES_PATH and extract unique work_ids.
-    Extract everything up to and including the 'n' + number part.
+    Scan all folders in FILES_PATH and extract unique lookup work_ids.
     Example: Jud_1523-2_n10_18v_enc_dipl_GLT.mei -> Jud_1523-2_n10
     """
     work_ids = set()
 
     for file_path in get_candidate_mei_files():
         file = os.path.basename(file_path)
-        # Remove .mei extension
-        base_name = file.replace(".mei", "")
-
-        # Use regex to find pattern: everything up to and including n + digits
-        # Pattern matches: start of string, any characters, underscore, n, one or more digits
-        match = re.match(r"^(.+_n\d+)", base_name)
-
-        if match:
-            work_id = match.group(1)
-            work_ids.add(work_id)
-        else:
-            # Fallback: if no 'n' pattern found, use the old method
-            if "_" in base_name:
-                work_id = base_name.rsplit("_", 1)[0]
-                work_ids.add(work_id)
-            else:
-                work_ids.add(base_name)
+        work_ids.add(get_work_id_from_filename_for_lookup(file))
 
     return sorted(list(work_ids))
 
@@ -362,25 +388,27 @@ def get_files_for_work_id(work_id):
     """
     Get all MEI files that belong to a specific work_id.
     """
-    import re
-
     matching_files = []
 
     for file_path in get_candidate_mei_files():
         file = os.path.basename(file_path)
-        base_name = file.replace(".mei", "")
+        file_work_id = get_work_id_from_filename_for_lookup(file)
 
-        # Use same regex pattern to extract work_id from filename
-        match = re.match(r"^(.+_n\d+)", base_name)
+        if file_work_id == work_id:
+            matching_files.append(file_path)
 
-        if match:
-            file_work_id = match.group(1)
-        else:
-            # Fallback: use old method
-            if "_" in base_name:
-                file_work_id = base_name.rsplit("_", 1)[0]
-            else:
-                file_work_id = base_name
+    return list(dict.fromkeys(sorted(matching_files)))
+
+
+def get_upload_files_for_work_id(work_id):
+    """
+    Get all upload files (MEI + provenance TTL) that belong to a specific work_id.
+    """
+    matching_files = []
+
+    for file_path in get_candidate_upload_files():
+        file = os.path.basename(file_path)
+        file_work_id = get_work_id_from_filename_for_lookup(file)
 
         if file_work_id == work_id:
             matching_files.append(file_path)
@@ -698,13 +726,17 @@ def update_records_in_RDM(work_ids_to_update):
 
         try:
             # Get files for this work_id and combine metadata
-            file_paths = get_files_for_work_id(work_id)
-            if not file_paths:
+            mei_file_paths = get_files_for_work_id(work_id)
+            if not mei_file_paths:
                 print(f"No files found for work_id: {work_id}")
+                continue
+            upload_file_paths = get_upload_files_for_work_id(work_id)
+            if not upload_file_paths:
+                print(f"No upload files found for work_id: {work_id}")
                 continue
 
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
-                work_id, file_paths
+                work_id, mei_file_paths
             )
 
             if metadata_df.empty:
@@ -713,7 +745,7 @@ def update_records_in_RDM(work_ids_to_update):
 
             # Create new metadata structure
             new_metadata_structure = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(file_paths)
+                metadata_df, people_df, corporate_df, len(mei_file_paths)
             )
             new_metadata = new_metadata_structure["metadata"]
 
@@ -770,7 +802,7 @@ def update_records_in_RDM(work_ids_to_update):
             fails = upload_to_rdm(
                 metadata=new_metadata_structure,
                 elaute_id=work_id,
-                file_paths=file_paths,
+                file_paths=upload_file_paths,
                 RDM_API_TOKEN=RDM_API_TOKEN,
                 RDM_API_URL=RDM_API_URL,
                 ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
@@ -848,16 +880,17 @@ def upload_mei_files(work_ids):
         print(f"\n--- Processing work_id: {work_id} ---")
 
         # Get all files for this work_id
-        file_paths = get_files_for_work_id(work_id)
+        mei_file_paths = get_files_for_work_id(work_id)
+        upload_file_paths = get_upload_files_for_work_id(work_id)
 
-        if not file_paths:
+        if not mei_file_paths or not upload_file_paths:
             failed_uploads.append(work_id)
             continue
 
         try:
             # Combine metadata from all files
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
-                work_id, file_paths
+                work_id, mei_file_paths
             )
 
             if metadata_df.empty:
@@ -866,7 +899,7 @@ def upload_mei_files(work_ids):
 
             # Create RDM metadata
             metadata = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(file_paths)
+                metadata_df, people_df, corporate_df, len(mei_file_paths)
             )
 
             # ---- UPLOAD ---
@@ -874,7 +907,7 @@ def upload_mei_files(work_ids):
             fails = upload_to_rdm(
                 metadata=metadata,
                 elaute_id=work_id,
-                file_paths=file_paths,
+                file_paths=upload_file_paths,
                 RDM_API_TOKEN=RDM_API_TOKEN,
                 RDM_API_URL=RDM_API_URL,
                 ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
@@ -917,7 +950,7 @@ def main():
         ELAUTE_COMMUNITY_ID,
     ) = setup_for_rdm_api_access(TESTING_MODE=testing_mode)
     SELECTED_UPLOAD_FILES = None
-    get_candidate_mei_files()
+    get_candidate_upload_files()
 
     new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
 
