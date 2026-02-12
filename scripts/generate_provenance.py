@@ -64,8 +64,7 @@ LOC_ROLE_CODE = {
 ROLE_TO_ACTIVITY_TYPES = {
     # Editing
     "musescoreEditor": [ELAUTE.musescoreEditingActivity],
-    "meiEditor": [
-        ELAUTE.meiEditingActivity    ],
+    "meiEditor": [ELAUTE.meiEditingActivity],
     # Typesetting
     "fronimoEditor": [ELAUTE.fronimoTypesettingActivity],
     # Note: Converting with luteconv mentions an application, not a role → skip
@@ -98,22 +97,22 @@ def _extract_text(elem: ET.Element) -> str:
 
 def _extract_notation_type(filename: str) -> str | None:
     """Extract notation type from filename (CMN, ILT, FLT, GLT).
-    
+
     Looks for uppercase notation type codes at the end of the filename
     before the extension.
     """
     # Valid notation types from vocab.ttl
     valid_types = {"CMN", "ILT", "FLT", "GLT"}
-    
+
     # Remove extension
     stem = Path(filename).stem
-    
+
     # Split by underscore and check each part
     parts = stem.split("_")
     for part in reversed(parts):  # Check from end
         if part.upper() in valid_types:
             return part.upper()
-    
+
     return None
 
 
@@ -166,7 +165,11 @@ def _extract_app_details(head: ET.Element, app_name: str) -> dict[str, str]:
         return details
     for app in app_info.findall("mei:application", MEI_XML):
         name_elem = app.find("mei:name", MEI_XML)
-        name = (name_elem.text or "").strip().lower() if name_elem is not None else ""
+        name = (
+            (name_elem.text or "").strip().lower()
+            if name_elem is not None
+            else ""
+        )
         # Match exact or substring (to support variants like "abtab -- transcriber")
         target = app_name.lower()
         if name == target or (target and target in name):
@@ -215,7 +218,7 @@ def parse_mei_head(path: Path) -> ET.Element:
     else:
         raise ValueError("The provided file doesn't look like an MEI document.")
     if head is None:
-        raise ValueError("<meiHead> element not found – is the file valid MEI?")
+        raise ValueError("<meiHead> element not found - is the file valid MEI?")
     return head
 
 
@@ -270,7 +273,9 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
             # Persons
             for p in resp.findall("mei:persName", MEI_XML):
                 role = p.get("role", "creator")
-                auth_uri = p.get("authURI") or p.get("authUri") or p.get("auth.uri")
+                auth_uri = (
+                    p.get("authURI") or p.get("authUri") or p.get("auth.uri")
+                )
                 if auth_uri:
                     agent_node = URIRef(auth_uri)
                 else:
@@ -281,10 +286,22 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
                 g.add((agent_node, RDF.type, PROV.Agent))
                 fn = p.find("mei:foreName", MEI_XML)
                 ln = p.find("mei:famName", MEI_XML)
-                if fn is not None and (fn.text or '').strip():
-                    g.add((agent_node, FOAF.givenName, Literal((fn.text or '').strip())))
-                if ln is not None and (ln.text or '').strip():
-                    g.add((agent_node, FOAF.familyName, Literal((ln.text or '').strip())))
+                if fn is not None and (fn.text or "").strip():
+                    g.add(
+                        (
+                            agent_node,
+                            FOAF.givenName,
+                            Literal((fn.text or "").strip()),
+                        )
+                    )
+                if ln is not None and (ln.text or "").strip():
+                    g.add(
+                        (
+                            agent_node,
+                            FOAF.familyName,
+                            Literal((ln.text or "").strip()),
+                        )
+                    )
 
                 # Track agents per role for pipeline steps
                 if role == "fronimoEditor":
@@ -321,7 +338,11 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
     facsimile_targets = _extract_facsimile_targets(file_path)
     # Link content item to facsimile images
     for tgt in facsimile_targets:
-        img_node = URIRef(tgt) if "://" in tgt else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+        img_node = (
+            URIRef(tgt)
+            if "://" in tgt
+            else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+        )
         g.add((img_node, RDF.type, PROV.Entity))
         g.add((contentitem_node, ELAUTE.hasFacsimile, img_node))
     e1_fronimo = None
@@ -345,7 +366,11 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
         g.add((a1_fronimo, PROV.generated, e1_fronimo))
         # First file derived from facsimile image(s)
         for tgt in facsimile_targets:
-            img_node = URIRef(tgt) if "://" in tgt else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+            img_node = (
+                URIRef(tgt)
+                if "://" in tgt
+                else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+            )
             g.add((img_node, RDF.type, PROV.Entity))
             g.add((e1_fronimo, PROV.wasDerivedFrom, img_node))
         # Pipeline Step 1.5: Luteconv conversion → converted MEI from FT3
@@ -376,23 +401,61 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
         start = luteconv_details.get("startdate")
         end = luteconv_details.get("enddate")
         if start:
-            g.add((a1_5, PROV.startedAtTime, Literal(start, datatype=XSD.dateTime)))
+            g.add(
+                (
+                    a1_5,
+                    PROV.startedAtTime,
+                    Literal(start, datatype=XSD.dateTime),
+                )
+            )
         if end:
             g.add((a1_5, PROV.endedAtTime, Literal(end, datatype=XSD.dateTime)))
-            g.add((e_conv_fronimo, PROV.generatedAtTime, Literal(end, datatype=XSD.dateTime)))
+            g.add(
+                (
+                    e_conv_fronimo,
+                    PROV.generatedAtTime,
+                    Literal(end, datatype=XSD.dateTime),
+                )
+            )
         elif iso:
             if len(iso) == 10 and iso.count("-") == 2:
                 g.add((a1_5, PROV.endedAtTime, Literal(iso, datatype=XSD.date)))
-                g.add((e_conv_fronimo, PROV.generatedAtTime, Literal(iso, datatype=XSD.date)))
+                g.add(
+                    (
+                        e_conv_fronimo,
+                        PROV.generatedAtTime,
+                        Literal(iso, datatype=XSD.date),
+                    )
+                )
             else:
-                g.add((a1_5, PROV.endedAtTime, Literal(iso, datatype=XSD.dateTime)))
-                g.add((e_conv_fronimo, PROV.generatedAtTime, Literal(iso, datatype=XSD.dateTime)))
+                g.add(
+                    (
+                        a1_5,
+                        PROV.endedAtTime,
+                        Literal(iso, datatype=XSD.dateTime),
+                    )
+                )
+                g.add(
+                    (
+                        e_conv_fronimo,
+                        PROV.generatedAtTime,
+                        Literal(iso, datatype=XSD.dateTime),
+                    )
+                )
         inferred_luteconv = _extract_notation_type(file_path.name)
         if inferred_luteconv:
-            g.add((e_conv_fronimo, ELAUTE.notationType, Literal(inferred_luteconv)))
+            g.add(
+                (
+                    e_conv_fronimo,
+                    ELAUTE.notationType,
+                    Literal(inferred_luteconv),
+                )
+            )
 
     if use_musescore:
-        a1_musescore = URIRef(ELAUTE_DATA + f"activities/{file_id}_musescore_editing_1")
+        a1_musescore = URIRef(
+            ELAUTE_DATA + f"activities/{file_id}_musescore_editing_1"
+        )
         g.add((a1_musescore, RDF.type, ELAUTE.musescoreEditingActivity))
         for agent in musescore_editors:
             g.add((a1_musescore, PROV.wasAssociatedWith, agent))
@@ -401,19 +464,25 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
             g.add((assoc_bn, RDF.type, PROV.Association))
             g.add((assoc_bn, PROV.agent, agent))
             g.add((assoc_bn, PROV.hadRole, _role_to_node("musescoreEditor")))
-        e1_musescore = URIRef(ELAUTE_DATA + f"files/{file_id}_generated_musescorexml")
+        e1_musescore = URIRef(
+            ELAUTE_DATA + f"files/{file_id}_generated_musescorexml"
+        )
         g.add((e1_musescore, RDF.type, PROV.Entity))
         g.add((e1_musescore, PROV.wasGeneratedBy, a1_musescore))
         g.add((a1_musescore, PROV.generated, e1_musescore))
         # First file derived from facsimile image(s)
         for tgt in facsimile_targets:
-            img_node = URIRef(tgt) if "://" in tgt else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+            img_node = (
+                URIRef(tgt)
+                if "://" in tgt
+                else URIRef(ELAUTE_DATA + f"resources/{_clean_uri(tgt)}")
+            )
             g.add((img_node, RDF.type, PROV.Entity))
             g.add((e1_musescore, PROV.wasDerivedFrom, img_node))
         # Pipeline Step 1.5 (MuseScore path): Verovio conversion → converted MEI from MusicXML
         a1_5_vero = URIRef(ELAUTE_DATA + f"activities/{file_id}_verovio_1")
         # Use a specific activity type if available in vocab; otherwise this still creates a URI
-        if hasattr(ELAUTE, 'verovioConvertingActivity'):
+        if hasattr(ELAUTE, "verovioConvertingActivity"):
             g.add((a1_5_vero, RDF.type, ELAUTE.verovioConvertingActivity))
         else:
             g.add((a1_5_vero, RDF.type, ELAUTE.convertingActivity))
@@ -430,8 +499,12 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
         g.add((verovio_assoc_bn, PROV.agent, verovio_agent))
         verovio_version = verovio_details.get("version")
         if verovio_version:
-            g.add((verovio_assoc_bn, DCTERMS.hasVersion, Literal(verovio_version)))
-        e_conv_musescore = URIRef(ELAUTE_DATA + f"files/{file_id}_converted_mei")
+            g.add(
+                (verovio_assoc_bn, DCTERMS.hasVersion, Literal(verovio_version))
+            )
+        e_conv_musescore = URIRef(
+            ELAUTE_DATA + f"files/{file_id}_converted_mei"
+        )
         g.add((e_conv_musescore, RDF.type, PROV.Entity))
         g.add((e_conv_musescore, PROV.wasGeneratedBy, a1_5_vero))
         g.add((a1_5_vero, PROV.generated, e_conv_musescore))
@@ -441,17 +514,59 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
         start_v = verovio_details.get("startdate")
         end_v = verovio_details.get("enddate")
         if start_v:
-            g.add((a1_5_vero, PROV.startedAtTime, Literal(start_v, datatype=XSD.dateTime)))
+            g.add(
+                (
+                    a1_5_vero,
+                    PROV.startedAtTime,
+                    Literal(start_v, datatype=XSD.dateTime),
+                )
+            )
         if end_v:
-            g.add((a1_5_vero, PROV.endedAtTime, Literal(end_v, datatype=XSD.dateTime)))
-            g.add((e_conv_musescore, PROV.generatedAtTime, Literal(end_v, datatype=XSD.dateTime)))
+            g.add(
+                (
+                    a1_5_vero,
+                    PROV.endedAtTime,
+                    Literal(end_v, datatype=XSD.dateTime),
+                )
+            )
+            g.add(
+                (
+                    e_conv_musescore,
+                    PROV.generatedAtTime,
+                    Literal(end_v, datatype=XSD.dateTime),
+                )
+            )
         elif iso_v:
             if len(iso_v) == 10 and iso_v.count("-") == 2:
-                g.add((a1_5_vero, PROV.endedAtTime, Literal(iso_v, datatype=XSD.date)))
-                g.add((e_conv_musescore, PROV.generatedAtTime, Literal(iso_v, datatype=XSD.date)))
+                g.add(
+                    (
+                        a1_5_vero,
+                        PROV.endedAtTime,
+                        Literal(iso_v, datatype=XSD.date),
+                    )
+                )
+                g.add(
+                    (
+                        e_conv_musescore,
+                        PROV.generatedAtTime,
+                        Literal(iso_v, datatype=XSD.date),
+                    )
+                )
             else:
-                g.add((a1_5_vero, PROV.endedAtTime, Literal(iso_v, datatype=XSD.dateTime)))
-                g.add((e_conv_musescore, PROV.generatedAtTime, Literal(iso_v, datatype=XSD.dateTime)))
+                g.add(
+                    (
+                        a1_5_vero,
+                        PROV.endedAtTime,
+                        Literal(iso_v, datatype=XSD.dateTime),
+                    )
+                )
+                g.add(
+                    (
+                        e_conv_musescore,
+                        PROV.generatedAtTime,
+                        Literal(iso_v, datatype=XSD.dateTime),
+                    )
+                )
         # Notation for converted MEI in this path is CMN
         g.add((e_conv_musescore, ELAUTE.notationType, Literal("CMN")))
 
@@ -520,16 +635,32 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
             abtab_details = _extract_app_details(head, "abtab")
             # Choose activity type and id by edition kind
             if edition_kind_ab == "dipl":
-                a_abtab = URIRef(ELAUTE_DATA + f"activities/{file_id}_abtab_notehead_1")
+                a_abtab = URIRef(
+                    ELAUTE_DATA + f"activities/{file_id}_abtab_notehead_1"
+                )
                 # Use specific activity if present in the vocabulary
                 if hasattr(ELAUTE, "abtabNoteheadTranscribingActivity"):
-                    g.add((a_abtab, RDF.type, ELAUTE.abtabNoteheadTranscribingActivity))
+                    g.add(
+                        (
+                            a_abtab,
+                            RDF.type,
+                            ELAUTE.abtabNoteheadTranscribingActivity,
+                        )
+                    )
                 else:
                     g.add((a_abtab, RDF.type, ELAUTE.transcribingActivity))
             else:
-                a_abtab = URIRef(ELAUTE_DATA + f"activities/{file_id}_abtab_polyphonic_1")
+                a_abtab = URIRef(
+                    ELAUTE_DATA + f"activities/{file_id}_abtab_polyphonic_1"
+                )
                 if hasattr(ELAUTE, "abtabPolyphonicTranscribingActivity"):
-                    g.add((a_abtab, RDF.type, ELAUTE.abtabPolyphonicTranscribingActivity))
+                    g.add(
+                        (
+                            a_abtab,
+                            RDF.type,
+                            ELAUTE.abtabPolyphonicTranscribingActivity,
+                        )
+                    )
                 else:
                     g.add((a_abtab, RDF.type, ELAUTE.transcribingActivity))
             # Associate software agent (with qualified association to carry version)
@@ -546,14 +677,38 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
             end_ab = abtab_details.get("enddate")
             iso_ab = abtab_details.get("isodate")
             if start_ab:
-                g.add((a_abtab, PROV.startedAtTime, Literal(start_ab, datatype=XSD.dateTime)))
+                g.add(
+                    (
+                        a_abtab,
+                        PROV.startedAtTime,
+                        Literal(start_ab, datatype=XSD.dateTime),
+                    )
+                )
             if end_ab:
-                g.add((a_abtab, PROV.endedAtTime, Literal(end_ab, datatype=XSD.dateTime)))
+                g.add(
+                    (
+                        a_abtab,
+                        PROV.endedAtTime,
+                        Literal(end_ab, datatype=XSD.dateTime),
+                    )
+                )
             elif iso_ab:
                 if len(iso_ab) == 10 and iso_ab.count("-") == 2:
-                    g.add((a_abtab, PROV.endedAtTime, Literal(iso_ab, datatype=XSD.date)))
+                    g.add(
+                        (
+                            a_abtab,
+                            PROV.endedAtTime,
+                            Literal(iso_ab, datatype=XSD.date),
+                        )
+                    )
                 else:
-                    g.add((a_abtab, PROV.endedAtTime, Literal(iso_ab, datatype=XSD.dateTime)))
+                    g.add(
+                        (
+                            a_abtab,
+                            PROV.endedAtTime,
+                            Literal(iso_ab, datatype=XSD.dateTime),
+                        )
+                    )
             # Link file as input used by abtab activity (output entity unknown for now)
             g.add((a_abtab, PROV.used, file_node))
             g.add((file_node, PROV.wasUsedBy, a_abtab))
@@ -562,9 +717,16 @@ def build_graph_from_head(head: ET.Element, file_path: Path) -> Graph:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Extract MEI header metadata to PROV-O RDF (rdflib refactor)")
+    parser = argparse.ArgumentParser(
+        description="Extract MEI header metadata to PROV-O RDF (rdflib refactor)"
+    )
     parser.add_argument("mei_file", help="Path to an MEI file")
-    parser.add_argument("--ttl", dest="ttl_output", default=None, help="Output Turtle file path; if omitted, print to stdout")
+    parser.add_argument(
+        "--ttl",
+        dest="ttl_output",
+        default=None,
+        help="Output Turtle file path; if omitted, print to stdout",
+    )
     args = parser.parse_args()
 
     mei_path = Path(args.mei_file)
