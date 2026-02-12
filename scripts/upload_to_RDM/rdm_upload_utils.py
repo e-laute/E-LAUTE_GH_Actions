@@ -7,6 +7,7 @@ import os
 import json
 import hashlib
 import argparse
+import time
 
 import pandas as pd
 
@@ -315,7 +316,48 @@ def upload_to_rdm(
             f"[INFO] Uploaded file {idx}/{len(file_paths)} for {elaute_id}: {filename}"
         )
 
-    # Add to E-LAUTE community
+    # Verify all expected files are completed before review/publish.
+    expected_keys = set(file_keys)
+    verified = False
+    for attempt in range(1, 7):
+        r = requests.get(links["files"], headers=h)
+        if r.status_code != 200:
+            print(
+                f"[WARN] Could not list draft files for verification "
+                f"(attempt {attempt}, code: {r.status_code})."
+            )
+            time.sleep(2)
+            continue
+
+        entries = r.json().get("entries", [])
+        completed_keys = {
+            entry.get("key")
+            for entry in entries
+            if entry.get("status") == "completed"
+        }
+        missing_keys = sorted(expected_keys - completed_keys)
+        print(
+            f"[INFO] Draft file verification attempt {attempt}: "
+            f"{len(completed_keys)}/{len(expected_keys)} completed."
+        )
+        if not missing_keys:
+            verified = True
+            break
+        if attempt < 6:
+            print(
+                f"[WARN] Waiting for pending files before review: {missing_keys}"
+            )
+            time.sleep(2)
+
+    if not verified:
+        print(
+            f"[ERROR] Not all files completed for {elaute_id}; "
+            "aborting review submission to avoid partial record."
+        )
+        failed_uploads.append(elaute_id)
+        return failed_uploads
+
+    # Add to E-LAUTE community review (new records only).
     if new_upload:
         if ELAUTE_COMMUNITY_ID:
             r = requests.put(
@@ -335,18 +377,8 @@ def upload_to_rdm(
             print(
                 "Warning: ELAUTE_COMMUNITY_ID not set, skipping community submission"
             )
-    # else:
-    #     # if a record has already been published, it can be published again after changes without needing a review
-    #     r = requests.post(
-    #         f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
-    #         headers=h,
-    #     )
-    #     if r.status_code != 202:
-    #         print(
-    #             f"Failed to publish record {record_id} (code: {r.status_code})"
-    #         )
 
-    # For production: create curation request and submit-review
+    # Create curation request (new records only).
     if new_upload:
         r = requests.post(
             f"{RDM_API_URL}/curations",
@@ -357,24 +389,22 @@ def upload_to_rdm(
             r.status_code == 201
         ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
 
-    # Submit the review for the record draft
+    # Submit draft for review (all records).
     r = requests.post(
         f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
         headers=h,
     )
-    if not r.status_code == 202:
+    if r.status_code != 202:
         print(
             f"Failed to submit review for record {record_id} (code: {r.status_code})"
         )
         failed_uploads.append(elaute_id)
+        return failed_uploads
 
-    r = requests.post(
-        f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
-        headers=h,
+    print(
+        "[INFO] Draft upload complete and submitted for review; publish skipped for manual approval. "
+        f"Draft: {RDM_API_URL}/uploads/{record_id}"
     )
-    if r.status_code != 202:
-        print(f"Failed to publish record {record_id} (code: {r.status_code})")
-        failed_uploads.append(elaute_id)
 
     return failed_uploads
 

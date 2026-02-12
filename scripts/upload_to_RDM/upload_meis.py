@@ -595,6 +595,7 @@ def fill_out_basic_metadata_for_work(
     row = metadata_row.iloc[0]
 
     metadata = {
+        "files": {"enabled": True},
         "metadata": {
             "title": f'{row["title"]} ({row["work_id"]}) MEI Transcriptions',
             "creators": [],
