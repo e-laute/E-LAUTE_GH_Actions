@@ -346,9 +346,18 @@ def prepare_upload_file_paths(work_id, upload_file_paths):
     """
     Bundle all .ttl files into one zip archive.
     """
-    ttl_files = [p for p in upload_file_paths if p.lower().endswith(".ttl")]
+    mei_files = sorted(
+        p for p in upload_file_paths if p.lower().endswith(".mei")
+    )
+    ttl_files = sorted(
+        p for p in upload_file_paths if p.lower().endswith(".ttl")
+    )
     if not ttl_files:
-        return list(upload_file_paths), None
+        print(
+            "[INFO] Upload payload prepared "
+            f"for {work_id}: {len(mei_files)} MEI files, no TTL zip"
+        )
+        return list(dict.fromkeys(upload_file_paths)), None
 
     temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
     safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
@@ -357,16 +366,23 @@ def prepare_upload_file_paths(work_id, upload_file_paths):
     with zipfile.ZipFile(
         zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
     ) as zip_file:
-        for ttl_path in sorted(ttl_files):
+        for ttl_path in ttl_files:
             zip_file.write(ttl_path, arcname=os.path.basename(ttl_path))
 
-    prepared_files = [
-        p for p in upload_file_paths if not p.lower().endswith(".ttl")
-    ]
+    with zipfile.ZipFile(zip_path, mode="r") as zip_file:
+        zipped_entries = zip_file.namelist()
+    if len(zipped_entries) != len(ttl_files):
+        raise ValueError(
+            f"TTL bundling mismatch for {work_id}: expected {len(ttl_files)} entries, "
+            f"got {len(zipped_entries)} in zip."
+        )
+
+    prepared_files = [p for p in upload_file_paths if not p.lower().endswith(".ttl")]
+    prepared_files = list(dict.fromkeys(prepared_files))
     prepared_files.append(zip_path)
     print(
-        "[INFO] Bundled TTL files into zip for upload: "
-        f"{len(ttl_files)} -> {zip_path}"
+        "[INFO] Upload payload prepared for "
+        f"{work_id}: {len(mei_files)} MEI + 1 TTL zip ({len(ttl_files)} TTL files)"
     )
     return prepared_files, temp_dir
 
