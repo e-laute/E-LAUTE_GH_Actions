@@ -270,20 +270,18 @@ def upload_to_rdm(
         record_id = r.json()["id"]
         print(links)
 
-    # Upload each file individually
-    i = 0
-    for file_path in file_paths:
+    # Register all files first, then upload/commit each one.
+    file_entries = [{"key": os.path.basename(file_path)} for file_path in file_paths]
+    r = requests.post(links["files"], data=json.dumps(file_entries), headers=h)
+    assert r.status_code == 201, f"Failed to initialize files (code: {r.status_code})"
+    response_entries = r.json().get("entries", [])
+    assert len(response_entries) == len(
+        file_paths
+    ), "File initialization response does not match number of files."
+
+    for file_path, entry in zip(file_paths, response_entries, strict=True):
         filename = os.path.basename(file_path)
-
-        # Initiate the file
-        data = json.dumps([{"key": filename}])
-        r = requests.post(links["files"], data=data, headers=h)
-        assert (
-            r.status_code == 201
-        ), f"Failed to create file {filename} (code: {r.status_code})"
-
-        file_links = r.json()["entries"][i]["links"]
-        i += 1
+        file_links = entry["links"]
 
         # Upload file content by streaming the data
         with open(file_path, "rb") as fp:

@@ -17,6 +17,9 @@ python -m upload_to_RDM.upload_meis --production
 
 import pandas as pd
 import os
+import shutil
+import tempfile
+import zipfile
 from lxml import etree
 
 import requests
@@ -337,6 +340,35 @@ def get_candidate_mei_files():
         for file_path in get_candidate_upload_files()
         if file_path.lower().endswith(".mei")
     ]
+
+
+def prepare_upload_file_paths(work_id, upload_file_paths):
+    """
+    Bundle all .ttl files into one zip archive.
+    """
+    ttl_files = [p for p in upload_file_paths if p.lower().endswith(".ttl")]
+    if not ttl_files:
+        return list(upload_file_paths), None
+
+    temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
+    safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
+    zip_path = os.path.join(temp_dir, f"{safe_work_id}_provenance_ttl.zip")
+
+    with zipfile.ZipFile(
+        zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+    ) as zip_file:
+        for ttl_path in sorted(ttl_files):
+            zip_file.write(ttl_path, arcname=os.path.basename(ttl_path))
+
+    prepared_files = [
+        p for p in upload_file_paths if not p.lower().endswith(".ttl")
+    ]
+    prepared_files.append(zip_path)
+    print(
+        "[INFO] Bundled TTL files into zip for upload: "
+        f"{len(ttl_files)} -> {zip_path}"
+    )
+    return prepared_files, temp_dir
 
 
 def get_full_id_from_filename(file_name: str) -> str:
@@ -799,16 +831,23 @@ def update_records_in_RDM(work_ids_to_update):
             new_version_data = r.json()
             new_record_id = new_version_data["id"]
 
-            fails = upload_to_rdm(
-                metadata=new_metadata_structure,
-                elaute_id=work_id,
-                file_paths=upload_file_paths,
-                RDM_API_TOKEN=RDM_API_TOKEN,
-                RDM_API_URL=RDM_API_URL,
-                ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
-                record_id=new_record_id,
+            prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
+                work_id, upload_file_paths
             )
-            failed_updates.extend(fails)
+            try:
+                fails = upload_to_rdm(
+                    metadata=new_metadata_structure,
+                    elaute_id=work_id,
+                    file_paths=prepared_file_paths,
+                    RDM_API_TOKEN=RDM_API_TOKEN,
+                    RDM_API_URL=RDM_API_URL,
+                    ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+                    record_id=new_record_id,
+                )
+                failed_updates.extend(fails)
+            finally:
+                if temp_bundle_dir:
+                    shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
         except Exception as e:
             print(f"Error updating record for work_id {work_id}: {str(e)}")
@@ -904,15 +943,22 @@ def upload_mei_files(work_ids):
 
             # ---- UPLOAD ---
 
-            fails = upload_to_rdm(
-                metadata=metadata,
-                elaute_id=work_id,
-                file_paths=upload_file_paths,
-                RDM_API_TOKEN=RDM_API_TOKEN,
-                RDM_API_URL=RDM_API_URL,
-                ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+            prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
+                work_id, upload_file_paths
             )
-            failed_uploads.extend(fails)
+            try:
+                fails = upload_to_rdm(
+                    metadata=metadata,
+                    elaute_id=work_id,
+                    file_paths=prepared_file_paths,
+                    RDM_API_TOKEN=RDM_API_TOKEN,
+                    RDM_API_URL=RDM_API_URL,
+                    ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+                )
+                failed_uploads.extend(fails)
+            finally:
+                if temp_bundle_dir:
+                    shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
         except AssertionError as e:
             print(f"Assertion error processing work_id {work_id}: {str(e)}")
