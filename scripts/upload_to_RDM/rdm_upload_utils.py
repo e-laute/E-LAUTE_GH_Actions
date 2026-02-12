@@ -281,10 +281,18 @@ def upload_to_rdm(
             r.status_code == 201
         ), f"Failed to create file {filename} (code: {r.status_code})"
         response_entries = r.json().get("entries", [])
+        selected_entry = None
+        for entry in response_entries:
+            if entry.get("key") == filename:
+                selected_entry = entry
+                break
+        if selected_entry is None and response_entries:
+            # Some API variants return cumulative entries; newest is last.
+            selected_entry = response_entries[-1]
         assert (
-            len(response_entries) == 1
-        ), f"Unexpected file-init response for {filename}: {len(response_entries)} entries"
-        file_links = response_entries[0]["links"]
+            selected_entry is not None
+        ), f"No file entry returned for {filename} during initialization."
+        file_links = selected_entry["links"]
 
         # Upload file content by streaming the data
         with open(file_path, "rb") as fp:
