@@ -317,6 +317,11 @@ def upload_to_rdm(
 
         # Commit the file.
         r = requests.post(file_links["commit"], headers=h)
+        if r.status_code != 200:
+            print(
+                f"[WARN] Commit failed for {filename} (code: {r.status_code}); retrying once."
+            )
+            r = requests.post(file_links["commit"], headers=h)
         assert r.status_code == 200, (
             f"Failed to commit file {filename} (code: {r.status_code}) "
             f"response: {r.text[:300]}"
