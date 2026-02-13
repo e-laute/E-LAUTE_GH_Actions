@@ -96,10 +96,10 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     :param addargs: Addional arguments that are unused
     """
 
-    dipl_glt = ("fnf", 0)
-    dipl_CMN = ("fnf", 0)
-    ed_glt = ("fnf", 0)
-    ed_CMN = ("fnf", 0)
+    dipl_glt = ("fnf", "0")
+    dipl_CMN = ("fnf", "0")
+    ed_glt = ("fnf", "0")
+    ed_CMN = ("fnf", "0")
 
     doms = [active_dom] + context_doms
 
