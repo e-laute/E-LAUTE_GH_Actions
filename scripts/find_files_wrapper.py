@@ -1,0 +1,118 @@
+import re
+import sys
+import argparse
+from pyprojroot import here
+from pathlib import Path
+import coordinator
+
+FILETYPE_CHOICES = [
+    "dipl",
+    "ed",
+    "CMN",
+    "GLT",
+    "dipl_CMN",
+    "dipl_GLT",
+    "ed_CMN",
+    "ed_GLT",
+]
+
+EXCLUDE_ERROR_MESSAGE = "Must all be numbers greater than 0"
+
+
+def format_filetypes(filetype: str):
+    """E-Laute specific implementation"""
+
+    if filetype is None:
+        return ["dipl_CMN", "ed_CMN", "dipl_GLT", "ed_GLT"]
+
+    match filetype:
+        case "dipl":
+            return ["dipl_CMN", "ed_CMN"]
+        case "ed":
+            return ["ed_CMN", "ed_GLT"]
+        case "CMN":
+            return ["dipl_CMN", "ed_CMN"]
+        case "GLT":
+            return ["dipl_GLT", "ed_GLT"]
+        case _:
+            return [filetype]
+
+
+def format_exclude_files(exclude: list):
+    if exclude is None:
+        return []
+    for id in exclude:
+        if not id.isdigit():
+            raise ValueError
+    return exclude
+
+
+def get_file_info(filepath: str):
+    file_match = re.match(
+        r".+n(\d+)_[0-9rv-]+_enc_((ed|dipl)_(CMN|GLT))\.mei", filepath
+    )
+    if file_match is None:
+        return None, None
+    return file_match.group(2), file_match.group(1)
+
+
+def initialize_parser():
+    """initializes parser for multiple files"""
+    parser = argparse.ArgumentParser(
+        description="Coordinates the execution of scripts in the workpackage on filepath"
+    )
+
+    parser.add_argument("-e", "--exclude", help="Files to be excluded", nargs="*")
+    parser.add_argument(
+        "-ft",
+        "--filetype",
+        help="The filetypes to be included, no filetypes given includes all",
+        choices=FILETYPE_CHOICES,
+    )
+    parser.add_argument(
+        "-w",
+        "--workpackage_id",
+        required=True,
+        help="The id of the workpackage to be executed",
+    )
+    parser.add_argument(
+        "-a",
+        "--addargs",
+        help="Additional arguments required by the workpackage, formatted as json",
+    )
+    return parser
+
+
+def root_filter(root: Path):
+    return False
+
+
+if __name__ == "__main__":
+    parser = initialize_parser()
+    args = parser.parse_args()
+    filetypes = format_filetypes(args.filetype)
+    try:
+        exclude_files = format_exclude_files(args.exclude)
+    except ValueError:
+        parser.error(EXCLUDE_ERROR_MESSAGE)
+
+    root = here()
+    for root, _, filepaths in root.walk():
+        if root_filter(root):
+            continue
+        for filepath in filepaths:
+            filetype, exclude = get_file_info(filepath)
+            if filetype is None or exclude is None:
+                continue
+            if filetype not in filetypes:
+                continue
+            if exclude in exclude_files:
+                continue
+            print(root / filepath)
+            sys.exit(
+                coordinator.main(
+                    workpackage_id=args.workpackage_id,
+                    filepath=root / filepath,
+                    addargs=args.addargs,
+                )
+            )
