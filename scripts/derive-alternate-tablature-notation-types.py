@@ -11,13 +11,6 @@ The script will:
 1. Process the GLT.mei files in the given folder and subfolders.
 2. Create FLT and ILT files from the GLT.mei files.
 
-
-TODO: ensure that this works with GitHub-Actions workflow (file retrieval, etc.)
-
-
-TODO: push files to a repository that the ÖNB has access to
-TODO: save (all?) files to a folder to be accessed when uploading to RDM
-
 TODO: make this tablature type acnostic and make sure that it works depending on type of input tablature
 
 """
@@ -79,7 +72,10 @@ def ensure_application_info(
 
     for existing_app in list(app_info.findall(f"{ns}application")):
         name_node = existing_app.find(f"{ns}name")
-        if name_node is not None and (name_node.text or "").strip() == name:
+        if name_node is None:
+            continue
+        name_text = name_node.text.strip() if isinstance(name_node.text, str) else ""
+        if name_text == name:
             app_info.remove(existing_app)
 
     # Generate xml:id: letter + 7 alphanumeric characters
@@ -252,7 +248,7 @@ def process_directory_recursively(folder_path):
 def main():
     """
     Use as follows (locally in .venv):
-    python scripts/GLT_to_FLT_and_ILT.py <folder>
+    python scripts/derive-alternate-tablature-notation-types.py <folder>
 
     where <folder> is a relative or absolute path to process.
     """
