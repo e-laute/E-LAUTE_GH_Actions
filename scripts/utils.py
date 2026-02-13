@@ -12,8 +12,21 @@ ns = {
 
 def write_to_github_step(message: str):
     # might get more complicated!
+    print(message)  # for testing
     with open(os.getenv("GITHUB_STEP_SUMMARY"), "a") as f:
-        f.write(message)
+        f.write(format_user_output(message))
+
+
+def format_user_output(
+    message: str,
+):  # to create string according to GH-Action standard
+    return (
+        "::group::Application Results\n",
+        "---START_USER_MESSAGE---\n",
+        f"{message}\n",
+        "---END_USER_MESSAGE---\n",
+        "::endgroup::\n",
+    )
 
 
 # TODO: move function from derive-alternate-tablature-notation-types.py here?
