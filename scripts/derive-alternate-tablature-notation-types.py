@@ -57,7 +57,7 @@ def inject_xml_model_declaration(tree, file_name):
 
 # TODO: move to utils.py (coordinate with Henning)
 def ensure_application_info(
-    tree_root, input_filename, output_filename, version, name
+    tree_root, input_filename, output_filename, version, app_name
 ):
     ns = "{http://www.music-encoding.org/ns/mei}"
     app_info = tree_root.find(f".//{ns}appInfo")
@@ -74,8 +74,10 @@ def ensure_application_info(
         name_node = existing_app.find(f"{ns}name")
         if name_node is None:
             continue
-        name_text = name_node.text.strip() if isinstance(name_node.text, str) else ""
-        if name_text == name:
+        name_text = (
+            name_node.text.strip() if isinstance(name_node.text, str) else ""
+        )
+        if name_text == app_name:
             app_info.remove(existing_app)
 
     # Generate xml:id: letter + 7 alphanumeric characters
@@ -92,8 +94,11 @@ def ensure_application_info(
             "{http://www.w3.org/XML/1998/namespace}id": random_id,
         },
     )
-    name = ET.SubElement(application, f"{ns}name")
-    name.text = name
+    app_name_node = ET.SubElement(application, f"{ns}name")
+    app_name_node.text = app_name
+
+    # Helpful debug info to verify the written application name.
+    print(f"Application name written: {app_name}")
 
     # Add conversion information
     p_from = ET.SubElement(application, f"{ns}p")
@@ -204,8 +209,24 @@ def process_mei_file(input_file, output_dir):
         return False
 
 
+def _resolve_output_path_with_collision_suffix(
+    target_dir, source_file_path, seen_targets
+):
+    """Create a deterministic output path and avoid name collisions."""
+    base_name = os.path.basename(source_file_path)
+    stem, ext = os.path.splitext(base_name)
+    candidate_path = os.path.join(target_dir, base_name)
+    counter = 1
+    while candidate_path in seen_targets or os.path.exists(candidate_path):
+        candidate_name = f"{stem}__dup{counter}{ext}"
+        candidate_path = os.path.join(target_dir, candidate_name)
+        counter += 1
+    seen_targets.add(candidate_path)
+    return candidate_path
+
+
 def process_directory_recursively(folder_path):
-    """Recursively process GLT.mei and CMN.mei files in the given folder and subfolders."""
+    """Process all MEI files recursively and save into one top-level converted folder."""
     output_dir = os.path.join(folder_path, "converted")
     german_dir = os.path.join(output_dir, "GLT")
     french_dir = os.path.join(output_dir, "FLT")
@@ -215,34 +236,34 @@ def process_directory_recursively(folder_path):
     for directory in (german_dir, french_dir, italian_dir, cmn_dir):
         os.makedirs(directory, exist_ok=True)
 
-    # Process files in the current directory
-    for file in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, file)
+    seen_glt_targets = set()
+    seen_cmn_targets = set()
 
-        # Skip directories at this level (they'll be processed recursively)
-        if os.path.isdir(file_path):
-            continue
+    for root, dirs, files in os.walk(folder_path):
+        # Never recurse into the generated output folder.
+        if "converted" in dirs:
+            dirs.remove("converted")
 
-        if file.endswith("GLT.mei"):
-            # Process the file to create FLT and ILT versions
-            if process_mei_file(file_path, output_dir):
-                # Copy the original GLT file to the GLT folder
-                shutil.copy(file_path, os.path.join(german_dir, file))
-            else:
-                print(f"Failed to process {file}")
+        for file in files:
+            file_path = os.path.join(root, file)
 
-        elif file.endswith("CMN.mei"):
-            try:
-                # Copy CMN file to the CMN folder
-                shutil.copy(file_path, os.path.join(cmn_dir, file))
-            except Exception as e:
-                print(f"Failed to copy {file}: {str(e)}")
+            if file.endswith("GLT.mei"):
+                if process_mei_file(file_path, output_dir):
+                    glt_target = _resolve_output_path_with_collision_suffix(
+                        german_dir, file_path, seen_glt_targets
+                    )
+                    shutil.copy(file_path, glt_target)
+                else:
+                    print(f"Failed to process {file_path}")
 
-    # Recursively process subdirectories
-    for item in os.listdir(folder_path):
-        item_path = os.path.join(folder_path, item)
-        if os.path.isdir(item_path) and item != "converted":
-            process_directory_recursively(item_path)
+            elif file.endswith("CMN.mei"):
+                try:
+                    cmn_target = _resolve_output_path_with_collision_suffix(
+                        cmn_dir, file_path, seen_cmn_targets
+                    )
+                    shutil.copy(file_path, cmn_target)
+                except Exception as e:
+                    print(f"Failed to copy {file_path}: {str(e)}")
 
 
 def main():

@@ -254,10 +254,13 @@ def run_provenance_on_converted_mei_files(
 
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
+        converted_root = folder_root.joinpath("converted")
+        if not converted_root.is_dir():
+            print(f"[WARN] Converted directory not found for {folder_id}: {converted_root}")
+            continue
         converted_mei_files = sorted(
             path.resolve()
-            for path in folder_root.rglob("*.mei")
-            if "converted" in path.parts
+            for path in converted_root.rglob("*.mei")
         )
         for mei_path in converted_mei_files:
             work_id = get_work_id_from_filename(mei_path.name)
@@ -307,11 +310,15 @@ def stage_converted_mei_files_by_id(
     excluded_files_count = 0
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
+        converted_root = folder_root.joinpath("converted")
+        if not converted_root.is_dir():
+            print(f"[WARN] Converted directory not found for {folder_id}: {converted_root}")
+            files_by_id[folder_id] = []
+            continue
         converted_sources = sorted(
             path.resolve()
-            for path in folder_root.rglob("*")
+            for path in converted_root.rglob("*")
             if path.is_file()
-            if "converted" in path.parts
             and path.suffix.lower() in {".mei", ".ttl"}
         )
         staged_files: list[str] = []
@@ -346,9 +353,8 @@ def cleanup_converted_directories(
     removed_count = 0
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
-        for converted_dir in sorted(
-            path for path in folder_root.rglob("converted") if path.is_dir()
-        ):
+        converted_dir = folder_root.joinpath("converted")
+        if converted_dir.is_dir():
             shutil.rmtree(converted_dir, ignore_errors=True)
             removed_count += 1
     print(
