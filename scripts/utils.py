@@ -21,11 +21,11 @@ def format_user_output(
     message: str,
 ):  # to create string according to GH-Action standard
     return (
-        "::group::Application Results\n",
-        "---START_USER_MESSAGE---\n",
-        f"{message}\n",
-        "---END_USER_MESSAGE---\n",
-        "::endgroup::\n",
+        "::group::Application Results\n"
+        "---START_USER_MESSAGE---\n"
+        f"{message}\n"
+        "---END_USER_MESSAGE---\n"
+        "::endgroup::\n"
     )
 
 
