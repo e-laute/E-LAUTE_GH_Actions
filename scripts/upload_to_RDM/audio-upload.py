@@ -971,6 +971,12 @@ def fill_out_basic_metadata(row, sources_table):
             ],
             "description": create_description(row, sources_table),
             "publication_date": datetime.today().strftime("%Y-%m-%d"),
+            "identifiers": [
+                {
+                    "identifier": row["work_id"],
+                    "scheme": "other",
+                }
+            ],
             "dates": [
                 {
                     "date": row["date"],

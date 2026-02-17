@@ -8,6 +8,7 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 
@@ -177,9 +178,16 @@ def look_up_source_links(sources_table, source_id):
 def create_related_identifiers(links):
     related_identifiers = []
     for link in links:
+        normalized_link = _normalize_url_identifier(link)
+        if not normalized_link:
+            print(
+                "Skipping non-URL related identifier value: "
+                f"{repr(link)}"
+            )
+            continue
         related_identifiers.append(
             {
-                "identifier": link,
+                "identifier": normalized_link,
                 "relation_type": {
                     "id": "ispartof",
                     "title": {"en": "Is part of"},
@@ -192,6 +200,30 @@ def create_related_identifiers(links):
             },
         )
     return related_identifiers
+
+
+def _normalize_url_identifier(value):
+    if value is None or pd.isna(value):
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    candidate = text
+    if candidate.startswith("www."):
+        candidate = f"https://{candidate}"
+    elif "://" not in candidate and " " not in candidate:
+        # Handle URLs in the source table that omit scheme.
+        head = candidate.split("/", 1)[0]
+        if "." in head:
+            candidate = f"https://{candidate}"
+
+    parsed = urlparse(candidate)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return candidate
+
+    return None
 
 
 def set_headers(RDM_API_TOKEN):
@@ -258,6 +290,32 @@ def _extract_metadata_payload(metadata):
     if isinstance(metadata, dict) and "metadata" in metadata:
         return metadata.get("metadata") or {}
     return metadata or {}
+
+
+def _ensure_elaute_identifier(metadata, elaute_id):
+    """
+    Ensure metadata contains the E-LAUTE id as an "other" identifier.
+    This keeps dedup/update mapping stable across all upload scripts.
+    """
+    if not isinstance(metadata, dict) or not elaute_id:
+        return metadata
+
+    metadata_payload = metadata.setdefault("metadata", {})
+    identifiers = metadata_payload.setdefault("identifiers", [])
+    if not isinstance(identifiers, list):
+        identifiers = []
+        metadata_payload["identifiers"] = identifiers
+
+    has_identifier = any(
+        isinstance(item, dict)
+        and item.get("scheme") == "other"
+        and str(item.get("identifier", "")).strip() == str(elaute_id)
+        for item in identifiers
+    )
+    if not has_identifier:
+        identifiers.append({"identifier": str(elaute_id), "scheme": "other"})
+
+    return metadata
 
 
 def _metadata_changed_for_update(
@@ -386,6 +444,64 @@ def _upload_initialized_files(file_entries, local_file_paths, headers, file_head
         )
 
 
+def _ensure_community_review_request(
+    record_id, headers, api_url, community_id, failed_uploads, elaute_id
+):
+    if not community_id:
+        print(
+            "ELAUTE_COMMUNITY_ID is not set; cannot submit review for "
+            f"record {record_id}."
+        )
+        failed_uploads.append(elaute_id)
+        return False
+
+    response = requests.put(
+        f"{api_url}/records/{record_id}/draft/review",
+        headers=headers,
+        data=json.dumps(
+            {
+                "receiver": {"community": community_id},
+                "type": "community-submission",
+            }
+        ),
+    )
+    if response.status_code != 200:
+        print(
+            "Failed to set review for record "
+            f"{record_id} (code: {response.status_code}) "
+            f"response: {response.text[:300]}"
+        )
+        failed_uploads.append(elaute_id)
+        return False
+    return True
+
+
+def _submit_review(
+    record_id, headers, api_url, failed_uploads, elaute_id
+):
+    response = requests.post(
+        f"{api_url}/records/{record_id}/draft/actions/submit-review",
+        headers=headers,
+        data=json.dumps(
+            {
+                "payload": {
+                    "content": "Submitted by E-LAUTE automated upload.",
+                    "format": "html",
+                }
+            }
+        ),
+    )
+    if response.status_code != 202:
+        print(
+            "Failed to submit review for record "
+            f"{record_id} (code: {response.status_code}) "
+            f"response: {response.text[:300]}"
+        )
+        failed_uploads.append(elaute_id)
+        return False
+    return True
+
+
 def upload_to_rdm(
     metadata,
     elaute_id,
@@ -395,6 +511,7 @@ def upload_to_rdm(
     ELAUTE_COMMUNITY_ID,
     record_id=None,
 ):
+    metadata = _ensure_elaute_identifier(metadata, elaute_id)
     new_upload = record_id is None
 
     failed_uploads = []
@@ -551,24 +668,16 @@ def upload_to_rdm(
 
     # Add to E-LAUTE community review (new records only).
     if new_upload:
-        if ELAUTE_COMMUNITY_ID:
-            r = requests.put(
-                f"{RDM_API_URL}/records/{record_id}/draft/review",
-                headers=h,
-                data=json.dumps(
-                    {
-                        "receiver": {"community": ELAUTE_COMMUNITY_ID},
-                        "type": "community-submission",
-                    }
-                ),
-            )
-            assert (
-                r.status_code == 200
-            ), f"Failed to set review for record {record_id} (code: {r.status_code})"
-        else:
-            print(
-                "Warning: ELAUTE_COMMUNITY_ID not set, skipping community submission"
-            )
+        ok = _ensure_community_review_request(
+            record_id,
+            h,
+            RDM_API_URL,
+            ELAUTE_COMMUNITY_ID,
+            failed_uploads,
+            elaute_id,
+        )
+        if not ok:
+            return failed_uploads
 
     # Create curation request (new records only).
     if new_upload:
@@ -583,16 +692,10 @@ def upload_to_rdm(
 
     if new_upload:
         # Submit new records to community review.
-        r = requests.post(
-            f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
-            headers=h,
+        ok = _submit_review(
+            record_id, h, RDM_API_URL, failed_uploads, elaute_id
         )
-        if r.status_code != 202:
-            print(
-                "Failed to submit review for record "
-                f"{record_id} (code: {r.status_code})"
-            )
-            failed_uploads.append(elaute_id)
+        if not ok:
             return failed_uploads
         print(
             "[INFO] Draft upload complete and submitted for review. "
@@ -601,16 +704,20 @@ def upload_to_rdm(
     else:
         if files_changed:
             # Updates with file changes must go to review.
-            r = requests.post(
-                f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
-                headers=h,
+            ok = _ensure_community_review_request(
+                record_id,
+                h,
+                RDM_API_URL,
+                ELAUTE_COMMUNITY_ID,
+                failed_uploads,
+                elaute_id,
             )
-            if r.status_code != 202:
-                print(
-                    "Failed to submit review for record "
-                    f"{record_id} (code: {r.status_code})"
-                )
-                failed_uploads.append(elaute_id)
+            if not ok:
+                return failed_uploads
+            ok = _submit_review(
+                record_id, h, RDM_API_URL, failed_uploads, elaute_id
+            )
+            if not ok:
                 return failed_uploads
             print(
                 "[INFO] Update upload with file changes submitted for review. "

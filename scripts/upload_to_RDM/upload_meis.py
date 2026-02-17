@@ -737,9 +737,10 @@ def fill_out_basic_metadata_for_work(
     # Add source links as related identifiers
     links_to_source = look_up_source_links(sources_table, row["source_id"])
     if links_to_source:
-        metadata["metadata"]["related_identifiers"].extend(
-            create_related_identifiers(links_to_source)
-        )
+        if pd.notna(row.get("source_link")):
+            metadata["metadata"]["related_identifiers"].extend(
+                create_related_identifiers(links_to_source)
+            )
 
     return metadata
 

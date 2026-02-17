@@ -496,9 +496,10 @@ def fill_out_basic_metadata(metadata_row, people_df, corporate_df):
         if link and str(link).strip() != "" and link == link
     ]
     if links_to_source:
-        metadata["metadata"]["related_identifiers"].extend(
-            create_related_identifiers(links_to_source)
-        )
+        if pd.notna(row.get("source_link")):
+            metadata["metadata"]["related_identifiers"].extend(
+                create_related_identifiers(links_to_source)
+            )
 
     return metadata
 
