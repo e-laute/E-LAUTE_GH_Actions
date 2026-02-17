@@ -2,7 +2,6 @@ files/
 envs/
 scripts/drive_files/
 scripts/json_metadata_files/
-scripts/work_id_record_id_mapping_TESTING.csv
 scripts/upload_to_RDM/tables/db_schoen23_2026-02-16_11-50-47.sql
 
 .DS_Store

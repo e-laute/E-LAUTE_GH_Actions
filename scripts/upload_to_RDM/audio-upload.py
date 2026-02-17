@@ -59,8 +59,6 @@ MP3_VBR_QUALITY = 2  # LAME VBR ~190-200 kbps (approx. 192 kbps)
 RDM_API_URL = None
 RDM_TOKEN = None
 ELAUTE_COMMUNITY_ID = None
-MAPPING_FILE = None
-URL_LIST_FILE = None
 
 GOOGLE_DRIVE_DIR = os.getenv("AUDIO_UPLOAD_FORM_DRIVE_DIR_JULIA")
 GOOGLE_DRIVE_OWNER = "Julia Jaklin"
@@ -74,8 +72,6 @@ def setup_config():
     global RDM_API_URL
     global RDM_TOKEN
     global ELAUTE_COMMUNITY_ID
-    global MAPPING_FILE
-    global URL_LIST_FILE
 
     if TESTING_MODE:
         print("🧪 Running in TESTING mode")
@@ -84,8 +80,6 @@ def setup_config():
         ELAUTE_COMMUNITY_ID = get_id_from_api(
             "https://test.researchdata.tuwien.ac.at/api/communities/e-laute-test"
         )
-        MAPPING_FILE = "work_id_record_id_mapping_TESTING.csv"
-        URL_LIST_FILE = "url_list_TESTING.csv"
     else:
         print("🚀 Running in PRODUCTION mode")
         RDM_TOKEN = os.getenv("RDM_API_TOKEN")
@@ -93,10 +87,7 @@ def setup_config():
         ELAUTE_COMMUNITY_ID = get_id_from_api(
             "https://researchdata.tuwien.ac.at/api/communities/e-laute"
         )
-        MAPPING_FILE = "work_id_record_id_mapping.csv"
-        URL_LIST_FILE = "url_list.csv"
 
-    print(f"Using mapping file: {MAPPING_FILE}")
     print(f"Using API URL: {RDM_API_URL}")
 
 
@@ -1020,8 +1011,6 @@ def upload_new_works_to_RDM(
 ):
     audio_dir = _as_path(audio_files_path)
     json_dir = _as_path(json_metadata_path)
-    record_mapping_data = []
-    current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     h, fh = set_headers(RDM_TOKEN)
     api_url = f"{RDM_API_URL}/records"
@@ -1034,15 +1023,7 @@ def upload_new_works_to_RDM(
         ), f"Failed to create record (code: {r.status_code})"
         links = r.json()["links"]
         record_id = r.json()["id"]
-
-        record_mapping_data.append(
-            {
-                "work_id": row["work_id"],
-                "record_id": record_id,
-                "created": current_timestamp,
-                "updated": current_timestamp,
-            }
-        )
+        print(f"Created record {record_id} for work_id {row['work_id']}")
 
         audio_files = sorted(audio_dir.glob(f"{row['work_id']}_*.wav"))
         mp3_files = sorted(audio_dir.glob(f"{row['work_id']}_*.mp3"))
@@ -1107,14 +1088,6 @@ def upload_new_works_to_RDM(
             r.status_code == 202
         ), f"Failed to submit review for record {record_id} (code: {r.status_code})"
 
-    mapping_df = pd.DataFrame(record_mapping_data)
-    mapping_df.to_csv(
-        MAPPING_FILE, index=False, sep=";", mode="a", header=False
-    )
-
-    print(mapping_df.head())
-
-
 def get_existing_records_by_work_id():
     records_df = get_records_from_RDM(
         RDM_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
@@ -1141,8 +1114,7 @@ def update_records_in_RDM(
 ):
     audio_dir = _as_path(audio_files_path)
     json_dir = _as_path(json_metadata_path)
-    current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    updated_records = []
+    updated_count = 0
     existing_records = get_existing_records_by_work_id()
 
     if not existing_records:
@@ -1377,14 +1349,7 @@ def update_records_in_RDM(
                 )
                 continue
 
-            updated_records.append(
-                {
-                    "work_id": work_id,
-                    "record_id": new_record_id,
-                    "created": current_record.get("created", ""),
-                    "updated": current_timestamp,
-                }
-            )
+            updated_count += 1
 
             print(
                 f"Successfully updated record for work_id {work_id}: "
@@ -1395,14 +1360,8 @@ def update_records_in_RDM(
             print(f"Error updating record for work_id {work_id}: {str(e)}")
             continue
 
-    if updated_records:
-        updated_df = pd.DataFrame(updated_records)
-        updated_df.to_csv(
-            MAPPING_FILE, index=False, sep=";", mode="a", header=False
-        )
-        print(
-            f"Updated {len(updated_records)} records and saved to {MAPPING_FILE}"
-        )
+    if updated_count:
+        print(f"Updated {updated_count} records.")
     else:
         print("No records were updated.")
 
@@ -1464,114 +1423,6 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
     return new_work_ids, existing_work_ids_to_check
 
 
-def update_url_list():
-    h, _fh = set_headers(RDM_TOKEN)
-
-    try:
-        record_df = pd.read_csv(
-            MAPPING_FILE,
-            sep=";",
-            quotechar='"',
-            quoting=1,
-            skipinitialspace=True,
-            engine="python",
-        )
-
-        if len(record_df) == 0:
-            print("No records found in mapping file")
-            return
-
-        latest_records = record_df.loc[
-            record_df.groupby("work_id")["updated"].idxmax()
-        ].copy()
-
-        parent_html_list = []
-        self_html_list = []
-        title_list = []
-        failed_records = []
-
-        for _idx, row in latest_records.iterrows():
-            r_id = row["record_id"]
-
-            try:
-                r = requests.get(
-                    f"{RDM_API_URL}/records/{r_id}", headers=h, timeout=30
-                )
-
-                if r.status_code != 200:
-                    failed_records.append(r_id)
-                    parent_html_list.append("")
-                    self_html_list.append("")
-                    title_list.append("")
-                    continue
-
-                response_json = r.json()
-                links = response_json.get("links", {})
-                parent_html = links.get("parent_html", "")
-                self_html = links.get("self_html", "")
-
-                metadata = response_json.get("metadata", {})
-                title = metadata.get("title", "")
-
-                parent_html_list.append(parent_html)
-                self_html_list.append(self_html)
-                title_list.append(title)
-
-            except requests.exceptions.Timeout:
-                failed_records.append(r_id)
-                parent_html_list.append("")
-                self_html_list.append("")
-                title_list.append("")
-            except Exception:
-                failed_records.append(r_id)
-                parent_html_list.append("")
-                self_html_list.append("")
-                title_list.append("")
-
-        successful = len(parent_html_list) - len(failed_records)
-        print(
-            "Processed "
-            f"{len(latest_records)} records: {successful} successful, "
-            f"{len(failed_records)} failed"
-        )
-
-        if failed_records:
-            print(f"Failed: {failed_records}")
-
-        expected_length = len(latest_records)
-        if (
-            len(parent_html_list) == expected_length
-            and len(self_html_list) == expected_length
-            and len(title_list) == expected_length
-        ):
-            latest_records["title"] = title_list
-            latest_records["all_versions_url"] = parent_html_list
-            latest_records["current_version_url"] = self_html_list
-
-            column_order = [
-                "work_id",
-                "record_id",
-                "title",
-                "created",
-                "updated",
-                "all_versions_url",
-                "current_version_url",
-            ]
-            latest_records = latest_records[column_order]
-
-            latest_records.to_csv(
-                URL_LIST_FILE, index=False, sep=";", quoting=1
-            )
-            print(f"Results saved to {URL_LIST_FILE}")
-        else:
-            print("Length mismatch - results not saved")
-
-    except FileNotFoundError:
-        print(f"Mapping file not found: {MAPPING_FILE}")
-    except Exception as e:
-        print(f"Error: {str(e)}")
-
-
 def main():
     setup_config()
 
@@ -1621,8 +1472,6 @@ def main():
     print(f"Total work_ids processed: {len(metadata_for_upload)}")
     print(f"New records created: {len(new_ids)}")
     print(f"Existing records checked: {len(existing_ids)}")
-
-    update_url_list()
 
 
 if __name__ == "__main__":
