@@ -28,6 +28,7 @@ import requests
 import re
 
 from datetime import datetime
+from pathlib import Path
 
 
 from upload_to_RDM.rdm_upload_utils import (
@@ -35,6 +36,7 @@ from upload_to_RDM.rdm_upload_utils import (
     set_headers,
     parse_rdm_cli_args,
     setup_for_rdm_api_access,
+    load_sources_table_csv,
     look_up_source_links,
     look_up_source_title,
     make_html_link,
@@ -52,21 +54,12 @@ SELECTED_UPLOAD_FILES = None
 
 errors = []
 metadata_df = pd.DataFrame()
-sources_table = pd.DataFrame()
 
-# TODO: implement extraction of info about sources from knowledge graph/dbrepo and not from exel-file
 sources_table_path = os.environ.get(
     "ELAUTE_SOURCES_TABLE_PATH",
-    os.path.join(os.path.dirname(__file__), "tables", "sources_table.xlsx"),
+    str(Path(__file__).resolve().parent / "tables" / "sources_table.csv"),
 )
-sources_excel_df = pd.read_excel(sources_table_path)
-sources_table["source_id"] = sources_excel_df["ID"].fillna(
-    sources_excel_df["Shelfmark"]
-)
-sources_table["Title"] = sources_excel_df["Title"]
-sources_table["Source_link"] = sources_excel_df["Source_link"].fillna("")
-sources_table["RISM_link"] = sources_excel_df["RISM_link"].fillna("")
-sources_table["VD_16"] = sources_excel_df["VD_16"].fillna("")
+sources_table = load_sources_table_csv(sources_table_path)
 
 
 def get_metadata_df_from_mei(mei_file_path):

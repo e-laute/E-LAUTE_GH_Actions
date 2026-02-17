@@ -13,6 +13,7 @@ from upload_to_RDM.rdm_upload_utils import (
     set_headers,
     parse_rdm_cli_args,
     setup_for_rdm_api_access,
+    load_sources_table_csv,
     look_up_source_links,
     make_html_link,
     create_related_identifiers,
@@ -26,23 +27,22 @@ FILES_PATH = None
 ELAUTE_COMMUNITY_ID = None
 
 # TODO: remove this and change the logic so that all files from the FILE_PATH are taken
-sources_table = pd.read_csv(
-    "scripts/upload_to_RDM/tables/file_name_id_lookup.csv"
+file_name_lookup_path = os.environ.get(
+    "ELAUTE_TEI_FILE_LOOKUP_PATH",
+    "scripts/upload_to_RDM/tables/file_name_id_lookup.csv",
 )
-sources_info_lookup_df = pd.read_excel(
-    "scripts/upload_to_RDM/tables/sources_table.xlsx"
+sources_info_lookup_path = os.environ.get(
+    "ELAUTE_SOURCES_TABLE_PATH",
+    "scripts/upload_to_RDM/tables/sources_table.csv",
 )
 
-
-columns_to_merge = ["Title", "Source_link", "DOI", "RISM_link", "VD_16"]
-merged = sources_table.merge(
-    sources_info_lookup_df[["ID"] + columns_to_merge],
-    left_on="source_id",
-    right_on="ID",
+sources_table = pd.read_csv(file_name_lookup_path, dtype="string")
+sources_info_lookup_df = load_sources_table_csv(sources_info_lookup_path)
+columns_to_merge = ["Title", "Source_link", "RISM_link", "VD_16"]
+sources_table = sources_table.merge(
+    sources_info_lookup_df[["source_id"] + columns_to_merge],
+    on="source_id",
     how="left",
-)
-sources_table = (
-    merged.drop(columns=["ID"]) if "ID" in merged.columns else merged
 )
 sources_table["file_path"] = None
 
