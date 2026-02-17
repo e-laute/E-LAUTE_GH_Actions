@@ -68,6 +68,25 @@ def _as_path(path_like):
     return path_like if isinstance(path_like, Path) else Path(path_like)
 
 
+def _normalize_work_id_alias(work_id):
+    if pd.isna(work_id):
+        return work_id
+    return re.sub(r"^Sotheby_tablature_n(\d+)$", r"Yale_tab_n\1", str(work_id))
+
+
+def _normalize_work_id_field(work_id_field):
+    if pd.isna(work_id_field):
+        return work_id_field
+
+    split_ids = [part.strip() for part in str(work_id_field).split(",")]
+    normalized_ids = [
+        _normalize_work_id_alias(work_id)
+        for work_id in split_ids
+        if work_id
+    ]
+    return ", ".join(normalized_ids)
+
+
 def setup_config():
     global RDM_API_URL
     global RDM_TOKEN
@@ -201,6 +220,10 @@ def clean_work_ids(form_responses_df):
         ] = (
             special_id + ", " + form_responses_df["work_id"]
         )
+
+    form_responses_df["work_id"] = form_responses_df["work_id"].apply(
+        _normalize_work_id_field
+    )
 
     form_responses_df.drop(columns=["work_id_2"], inplace=True)
 
@@ -355,8 +378,23 @@ def build_metadata_df(form_responses_df, id_table):
                 fols.append(fol)
 
         if titles or fols:
-            concatenated_title = ", ".join(titles)
-            concatenated_fol = ", ".join(fols)
+            cleaned_titles = [
+                str(value).strip()
+                for value in titles
+                if pd.notna(value) and str(value).strip()
+            ]
+            cleaned_fols = [
+                str(value).strip()
+                for value in fols
+                if pd.notna(value) and str(value).strip()
+            ]
+
+            concatenated_title = (
+                ", ".join(cleaned_titles) if cleaned_titles else pd.NA
+            )
+            concatenated_fol = (
+                ", ".join(cleaned_fols) if cleaned_fols else pd.NA
+            )
             merged_df.loc[merged_df["work_id"] == missing_id, "title"] = (
                 concatenated_title
             )
@@ -367,6 +405,13 @@ def build_metadata_df(form_responses_df, id_table):
     remaining_missing = merged_df[
         merged_df["title"].isna() | merged_df["fol_or_p"].isna()
     ]
+    missing_fol_only = merged_df[merged_df["fol_or_p"].isna()]
+    if not missing_fol_only.empty:
+        missing_fol_work_ids = list(
+            dict.fromkeys(missing_fol_only["work_id"].dropna().tolist())
+        )
+        print(f"fol_or_p is missing for the work_ids: {missing_fol_work_ids}")
+
     if not remaining_missing.empty:
         print("The following work_ids could not be found in id_table:")
         print(remaining_missing["work_id"].tolist())
@@ -1087,6 +1132,7 @@ def upload_new_works_to_RDM(
         assert (
             r.status_code == 202
         ), f"Failed to submit review for record {record_id} (code: {r.status_code})"
+
 
 def get_existing_records_by_work_id():
     records_df = get_records_from_RDM(
