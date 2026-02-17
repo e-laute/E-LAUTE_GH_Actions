@@ -31,20 +31,18 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-import requests
 import taglib
 from dotenv import load_dotenv
 from wavinfo import WavInfoReader
 
 from upload_to_RDM.rdm_upload_utils import (
-    compare_hashed_files,
     create_related_identifiers,
     get_id_from_api,
     get_records_from_RDM,
     look_up_source_links,
     look_up_source_title,
     make_html_link,
-    set_headers,
+    upload_to_rdm,
 )
 
 load_dotenv()
@@ -1051,89 +1049,6 @@ def fill_out_basic_metadata(row, sources_table):
     return metadata
 
 
-def upload_new_works_to_RDM(
-    metadata_for_upload, audio_files_path, json_metadata_path
-):
-    audio_dir = _as_path(audio_files_path)
-    json_dir = _as_path(json_metadata_path)
-
-    h, fh = set_headers(RDM_TOKEN)
-    api_url = f"{RDM_API_URL}/records"
-
-    for _index, row in metadata_for_upload.iterrows():
-        metadata = fill_out_basic_metadata(row, sources_table)
-        r = requests.post(api_url, data=json.dumps(metadata), headers=h)
-        assert (
-            r.status_code == 201
-        ), f"Failed to create record (code: {r.status_code})"
-        links = r.json()["links"]
-        record_id = r.json()["id"]
-        print(f"Created record {record_id} for work_id {row['work_id']}")
-
-        audio_files = sorted(audio_dir.glob(f"{row['work_id']}_*.wav"))
-        mp3_files = sorted(audio_dir.glob(f"{row['work_id']}_*.mp3"))
-        json_files = sorted(json_dir.glob(f"{row['work_id']}_*.json"))
-
-        files = []
-        if audio_files:
-            files.append(audio_files[0])
-        if mp3_files:
-            files.append(mp3_files[0])
-        if json_files:
-            files.append(json_files[0])
-
-        i = 0
-        for file_path in files:
-            data = json.dumps([{"key": file_path.name}])
-            r = requests.post(links["files"], data=data, headers=h)
-            assert (
-                r.status_code == 201
-            ), f"Failed to create file {file_path} (code: {r.status_code})"
-            file_links = r.json()["entries"][i]["links"]
-            i += 1
-
-            with file_path.open("rb") as fp:
-                r = requests.put(file_links["content"], data=fp, headers=fh)
-            assert (
-                r.status_code == 200
-            ), f"Failed to upload file content {file_path} (code: {r.status_code})"
-
-            r = requests.post(file_links["commit"], headers=h)
-            assert (
-                r.status_code == 200
-            ), f"Failed to commit file {file_path} (code: {r.status_code})"
-
-        r = requests.post(
-            f"{RDM_API_URL}/curations",
-            headers=h,
-            data=json.dumps({"topic": {"record": record_id}}),
-        )
-        assert (
-            r.status_code == 201
-        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
-
-        r = requests.put(
-            f"{api_url}/{record_id}/draft/review",
-            headers=h,
-            data=json.dumps(
-                {
-                    "receiver": {"community": ELAUTE_COMMUNITY_ID},
-                    "type": "community-submission",
-                }
-            ),
-        )
-        assert (
-            r.status_code == 200
-        ), f"Failed to set review for record {record_id} (code: {r.status_code})"
-
-        r = requests.post(
-            f"{api_url}/{record_id}/draft/actions/submit-review", headers=h
-        )
-        assert (
-            r.status_code == 202
-        ), f"Failed to submit review for record {record_id} (code: {r.status_code})"
-
-
 def get_existing_records_by_work_id():
     records_df = get_records_from_RDM(
         RDM_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
@@ -1153,263 +1068,6 @@ def get_existing_records_by_work_id():
     records_df = records_df.sort_values("updated_dt")
     latest_records = records_df.groupby("elaute_id").tail(1)
     return dict(zip(latest_records["elaute_id"], latest_records["record_id"]))
-
-
-def update_records_in_RDM(
-    metadata_for_upload, audio_files_path, json_metadata_path
-):
-    audio_dir = _as_path(audio_files_path)
-    json_dir = _as_path(json_metadata_path)
-    updated_count = 0
-    existing_records = get_existing_records_by_work_id()
-
-    if not existing_records:
-        print("No existing records found. Skipping updates.")
-        return
-
-    h, fh = set_headers(RDM_TOKEN)
-
-    def _get_remote_file_info(record_id):
-        try:
-            r = requests.get(
-                f"{RDM_API_URL}/records/{record_id}/files", headers=h
-            )
-            if r.status_code != 200:
-                print(
-                    "Failed to fetch file list for record "
-                    f"{record_id} (code: {r.status_code})"
-                )
-                return None
-            entries = r.json().get("entries", [])
-        except Exception as exc:
-            print(f"Failed to fetch file list for record {record_id}: {exc}")
-            return None
-
-        remote_info = {}
-        for entry in entries:
-            key = entry.get("key")
-            if not key:
-                continue
-            remote_info[key] = {
-                "checksum": entry.get("checksum"),
-                "size": entry.get("size"),
-            }
-        return remote_info
-
-    def _files_changed(record_id, local_files):
-        remote_info = _get_remote_file_info(record_id)
-        if remote_info is None:
-            print("Could not verify remote files; assuming changes exist.")
-            return True
-
-        local_names = {path.name for path in local_files}
-        remote_names = set(remote_info.keys())
-
-        if local_names != remote_names:
-            missing = local_names - remote_names
-            extra = remote_names - local_names
-            if missing:
-                print(f"Remote missing files: {sorted(missing)}")
-            if extra:
-                print(f"Remote has extra files: {sorted(extra)}")
-            return True
-
-        for path in local_files:
-            name = path.name
-            remote = remote_info.get(name, {})
-            remote_size = remote.get("size")
-
-            if remote_size is not None:
-                if not compare_hashed_files(remote_size, path.stat().st_size):
-                    print(f"Size mismatch for {name}")
-                    return True
-            else:
-                print(f"No checksum/size for {name}; assuming changes exist.")
-                return True
-
-        return False
-
-    fields_to_compare = [
-        "title",
-        "creators",
-        "contributors",
-        "description",
-        "dates",
-        "publisher",
-        "references",
-        "related_identifiers",
-        "resource_type",
-        "rights",
-    ]
-
-    for _index, row in metadata_for_upload.iterrows():
-        work_id = row["work_id"]
-        record_id = existing_records.get(work_id)
-        if not record_id:
-            print(f"Work ID {work_id} not found in existing records. Skipping.")
-            continue
-
-        print(f"Checking record {record_id} for work_id {work_id}")
-
-        try:
-            r = requests.get(f"{RDM_API_URL}/records/{record_id}", headers=h)
-            if r.status_code != 200:
-                print(
-                    f"Failed to fetch record {record_id} (code: {r.status_code})"
-                )
-                continue
-
-            current_record = r.json()
-            current_metadata = current_record.get("metadata", {})
-
-            new_metadata_structure = fill_out_basic_metadata(row, sources_table)
-            new_metadata = new_metadata_structure["metadata"]
-
-            metadata_changed = False
-            changes_detected = []
-
-            for field in fields_to_compare:
-                current_value = current_metadata.get(field)
-                new_value = new_metadata.get(field)
-
-                if not compare_hashed_files(current_value, new_value):
-                    metadata_changed = True
-                    changes_detected.append(field)
-                    print(f"  Field '{field}' changed:")
-                    print(
-                        f"    Current: {json.dumps(current_value, indent=2) if current_value else 'None'}"
-                    )
-                    print(
-                        f"    New: {json.dumps(new_value, indent=2) if new_value else 'None'}"
-                    )
-
-            audio_files = sorted(audio_dir.glob(f"{work_id}_*.wav"))
-            mp3_files = sorted(audio_dir.glob(f"{work_id}_*.mp3"))
-            json_files = sorted(json_dir.glob(f"{work_id}_*.json"))
-            local_files = []
-            if audio_files:
-                local_files.extend(audio_files)
-            if mp3_files:
-                local_files.extend(mp3_files)
-            if json_files:
-                local_files.extend(json_files)
-
-            files_changed = _files_changed(record_id, local_files)
-
-            if not metadata_changed and not files_changed:
-                print(
-                    "Warning: no metadata or file changes detected for "
-                    f"work_id {work_id}; skipping update."
-                )
-                continue
-            if not metadata_changed and files_changed:
-                print(
-                    "Metadata unchanged but file changes detected for "
-                    f"work_id {work_id}; creating new version."
-                )
-
-            print(
-                "Metadata changes detected for work_id "
-                f"{work_id} in fields: {', '.join(changes_detected)}"
-            )
-
-            r = requests.post(
-                f"{RDM_API_URL}/records/{record_id}/versions", headers=h
-            )
-            if r.status_code != 201:
-                print(
-                    "Failed to create new version for record "
-                    f"{record_id} (code: {r.status_code})"
-                )
-                continue
-
-            new_version_data = r.json()
-            new_record_id = new_version_data["id"]
-            print(f"Created new version {new_record_id} for work_id {work_id}")
-
-            r = requests.put(
-                f"{RDM_API_URL}/records/{new_record_id}/draft",
-                data=json.dumps(new_metadata_structure),
-                headers=h,
-            )
-            if r.status_code != 200:
-                print(
-                    "Failed to update draft "
-                    f"{new_record_id} (code: {r.status_code})"
-                )
-                continue
-
-            if audio_files or mp3_files or json_files:
-                r = requests.delete(
-                    f"{RDM_API_URL}/records/{new_record_id}/draft/files",
-                    headers=h,
-                )
-
-                files = local_files
-
-                file_entries = [{"key": f.name} for f in files]
-                data = json.dumps(file_entries)
-                r = requests.post(
-                    f"{RDM_API_URL}/records/{new_record_id}/draft/files",
-                    data=data,
-                    headers=h,
-                )
-                if r.status_code != 201:
-                    print(
-                        "Failed to initialize files for record "
-                        f"{new_record_id} (code: {r.status_code})"
-                    )
-                    continue
-
-                file_responses = r.json()["entries"]
-
-                for i, file_path in enumerate(files):
-                    file_links = file_responses[i]["links"]
-                    with file_path.open("rb") as fp:
-                        r = requests.put(
-                            file_links["content"], data=fp, headers=fh
-                        )
-                    if r.status_code != 200:
-                        print(
-                            "Failed to upload file content "
-                            f"{file_path} (code: {r.status_code})"
-                        )
-                        continue
-
-                    r = requests.post(file_links["commit"], headers=h)
-                    if r.status_code != 200:
-                        print(
-                            f"Failed to commit file {file_path} "
-                            f"(code: {r.status_code})"
-                        )
-                        continue
-
-            r = requests.post(
-                f"{RDM_API_URL}/records/{new_record_id}/draft/actions/publish",
-                headers=h,
-            )
-            if r.status_code != 202:
-                print(
-                    f"Failed to publish record {new_record_id} "
-                    f"(code: {r.status_code})"
-                )
-                continue
-
-            updated_count += 1
-
-            print(
-                f"Successfully updated record for work_id {work_id}: "
-                f"{new_record_id}"
-            )
-
-        except Exception as e:
-            print(f"Error updating record for work_id {work_id}: {str(e)}")
-            continue
-
-    if updated_count:
-        print(f"Updated {updated_count} records.")
-    else:
-        print("No records were updated.")
 
 
 def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
@@ -1433,38 +1091,48 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
         f"{len(existing_work_ids_to_check)}"
     )
 
-    new_records_df = metadata_for_upload[
-        metadata_for_upload["work_id"].isin(new_work_ids)
-    ]
-    existing_records_df = metadata_for_upload[
-        metadata_for_upload["work_id"].isin(existing_work_ids_to_check)
-    ]
+    audio_dir = _as_path(audio_files_path)
+    json_dir = _as_path(json_metadata_path)
 
-    if not new_records_df.empty:
-        print(f"\nCreating {len(new_records_df)} new records...")
-        try:
-            upload_new_works_to_RDM(
-                new_records_df, audio_files_path, json_metadata_path
-            )
-            print("Successfully created new records")
-        except Exception as e:
-            print(f"Error creating new records: {str(e)}")
-    else:
-        print("\nNo new records to create")
+    def _collect_upload_files(work_id):
+        audio_files = sorted(audio_dir.glob(f"{work_id}_*.wav"))
+        mp3_files = sorted(audio_dir.glob(f"{work_id}_*.mp3"))
+        json_files = sorted(json_dir.glob(f"{work_id}_*.json"))
+        files = []
+        if audio_files:
+            files.append(audio_files[0])
+        if mp3_files:
+            files.append(mp3_files[0])
+        if json_files:
+            files.append(json_files[0])
+        return files
 
-    if not existing_records_df.empty:
-        print(
-            f"\nChecking {len(existing_records_df)} existing records for updates..."
-        )
+    failed_uploads = []
+    for _index, row in metadata_for_upload.iterrows():
+        work_id = row["work_id"]
+        metadata = fill_out_basic_metadata(row, sources_table)
+        files = _collect_upload_files(work_id)
+        record_id = existing_records.get(work_id)
+
         try:
-            update_records_in_RDM(
-                existing_records_df, audio_files_path, json_metadata_path
+            fails = upload_to_rdm(
+                metadata=metadata,
+                elaute_id=work_id,
+                file_paths=files,
+                RDM_API_TOKEN=RDM_TOKEN,
+                RDM_API_URL=RDM_API_URL,
+                ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+                record_id=record_id,
             )
-            print("Successfully processed existing records")
+            failed_uploads.extend(fails)
         except Exception as e:
-            print(f"Error updating existing records: {str(e)}")
-    else:
-        print("\nNo existing records to check")
+            print(f"Error processing work_id {work_id}: {str(e)}")
+            failed_uploads.append(work_id)
+
+    if failed_uploads:
+        print("\nFAILED UPLOADS:")
+        for work_id in failed_uploads:
+            print(f"   - {work_id}")
 
     return new_work_ids, existing_work_ids_to_check
 
