@@ -254,6 +254,138 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
     return pd.DataFrame(records)
 
 
+def _extract_metadata_payload(metadata):
+    if isinstance(metadata, dict) and "metadata" in metadata:
+        return metadata.get("metadata") or {}
+    return metadata or {}
+
+
+def _metadata_changed_for_update(
+    current_record, new_metadata_payload, fields_to_compare
+):
+    current_metadata = current_record.get("metadata", {})
+    changed_fields = []
+    for field in fields_to_compare:
+        current_value = current_metadata.get(field)
+        new_value = new_metadata_payload.get(field)
+        if not compare_hashed_files(current_value, new_value):
+            changed_fields.append(field)
+    return bool(changed_fields), changed_fields
+
+
+def _get_remote_file_info(record_id, headers, api_url):
+    try:
+        response = requests.get(
+            f"{api_url}/records/{record_id}/files", headers=headers
+        )
+        if response.status_code != 200:
+            print(
+                f"Failed to fetch file list for record {record_id} "
+                f"(code: {response.status_code})"
+            )
+            return None
+        entries = response.json().get("entries", [])
+    except Exception as exc:
+        print(f"Failed to fetch file list for record {record_id}: {exc}")
+        return None
+
+    remote_info = {}
+    for entry in entries:
+        key = entry.get("key")
+        if not key:
+            continue
+        remote_info[key] = {
+            "size": entry.get("size"),
+            "checksum": entry.get("checksum"),
+        }
+    return remote_info
+
+
+def _calculate_local_md5_checksum(file_path):
+    digest = hashlib.md5()
+    with file_path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8192), b""):
+            digest.update(chunk)
+    return f"md5:{digest.hexdigest()}"
+
+
+def _files_changed_for_update(record_id, local_file_paths, headers, api_url):
+    remote_info = _get_remote_file_info(record_id, headers, api_url)
+    if remote_info is None:
+        print("Could not verify remote files; assuming changes exist.")
+        return True
+
+    local_names = {path.name for path in local_file_paths}
+    remote_names = set(remote_info.keys())
+
+    if local_names != remote_names:
+        missing = sorted(local_names - remote_names)
+        extra = sorted(remote_names - local_names)
+        if missing:
+            print(f"Remote missing files: {missing}")
+        if extra:
+            print(f"Remote has extra files: {extra}")
+        return True
+
+    for path in local_file_paths:
+        remote_entry = remote_info.get(path.name, {})
+        remote_checksum = remote_entry.get("checksum")
+        if not remote_checksum:
+            print(
+                "Remote checksum missing for "
+                f"{path.name}; assuming changes exist."
+            )
+            return True
+
+        local_checksum = _calculate_local_md5_checksum(path)
+        if not compare_hashed_files(remote_checksum, local_checksum):
+            print(
+                "Checksum mismatch for "
+                f"{path.name}: remote={remote_checksum}, local={local_checksum}"
+            )
+            return True
+
+    return False
+
+
+def _upload_initialized_files(file_entries, local_file_paths, headers, file_headers):
+    file_links_by_key = {}
+    for entry in file_entries:
+        key = entry.get("key")
+        links = entry.get("links", {})
+        if key:
+            file_links_by_key[key] = links
+
+    for file_path in local_file_paths:
+        filename = file_path.name
+        links = file_links_by_key.get(filename, {})
+        if "content" not in links or "commit" not in links:
+            raise AssertionError(f"Missing upload/commit links for {filename}.")
+
+        with file_path.open("rb") as fp:
+            response = requests.put(
+                links["content"],
+                data=fp,
+                headers=file_headers,
+            )
+        assert response.status_code == 200, (
+            f"Failed to upload file content {filename} "
+            f"(code: {response.status_code})"
+        )
+
+        response = requests.post(links["commit"], headers=headers)
+        if response.status_code != 200:
+            print(
+                f"[WARN] Commit failed for {filename} "
+                f"(code: {response.status_code}); retrying once."
+            )
+            response = requests.post(links["commit"], headers=headers)
+        assert response.status_code == 200, (
+            f"Failed to commit file {filename} (code: {response.status_code}) "
+            f"response: {response.text[:300]}"
+        )
+
+
 def upload_to_rdm(
     metadata,
     elaute_id,
@@ -266,12 +398,62 @@ def upload_to_rdm(
     new_upload = record_id is None
 
     failed_uploads = []
-    print(f"Processing {elaute_id}: {len(file_paths)} files")
+    local_file_paths = [Path(path) for path in file_paths]
+    print(f"Processing {elaute_id}: {len(local_file_paths)} files")
     h, fh = set_headers(RDM_API_TOKEN)
 
     print("record_id:", record_id)
 
     if not new_upload:
+        metadata_payload = _extract_metadata_payload(metadata)
+        fields_to_compare = [
+            "title",
+            "creators",
+            "contributors",
+            "description",
+            "identifiers",
+            "dates",
+            "publisher",
+            "references",
+            "related_identifiers",
+            "resource_type",
+            "rights",
+        ]
+
+        r = requests.get(f"{RDM_API_URL}/records/{record_id}", headers=h)
+        if r.status_code != 200:
+            print(
+                f"Failed to fetch record {record_id} (code: {r.status_code})"
+            )
+            failed_uploads.append(elaute_id)
+            return failed_uploads
+
+        metadata_changed, changed_fields = _metadata_changed_for_update(
+            r.json(),
+            metadata_payload,
+            fields_to_compare,
+        )
+        files_changed = _files_changed_for_update(
+            record_id, local_file_paths, h, RDM_API_URL
+        )
+
+        if not metadata_changed and not files_changed:
+            print(
+                "No metadata or file changes detected for "
+                f"{elaute_id}; skipping update."
+            )
+            return failed_uploads
+        if metadata_changed:
+            print(
+                "Metadata changes detected for "
+                f"{elaute_id} in fields: {', '.join(changed_fields)}"
+            )
+        elif files_changed:
+            print(
+                "Metadata unchanged but file changes detected for "
+                f"{elaute_id}; creating new version."
+            )
+
         # Create a new version/draft for the record
         r = requests.post(
             f"{RDM_API_URL}/records/{record_id}/versions",
@@ -307,6 +489,34 @@ def upload_to_rdm(
         links = r.json()["links"]
         record_id = r.json()["id"]
         print(links)
+
+        # Only replace draft files when file differences were detected.
+        if files_changed:
+            # Full replacement: remove old draft files, initialize all new files,
+            # then upload and commit each one.
+            r = requests.delete(
+                f"{RDM_API_URL}/records/{record_id}/draft/files",
+                headers=h,
+            )
+            if r.status_code not in (200, 204):
+                print(
+                    "Warning: could not clear draft files for "
+                    f"{record_id} (code: {r.status_code}). Continuing."
+                )
+
+            file_entries = [{"key": path.name} for path in local_file_paths]
+            r = requests.post(
+                links["files"],
+                data=json.dumps(file_entries),
+                headers=h,
+            )
+            assert r.status_code == 201, (
+                f"Failed to initialize files for record {record_id} "
+                f"(code: {r.status_code}) response: {r.text[:300]}"
+            )
+            _upload_initialized_files(
+                r.json().get("entries", []), local_file_paths, h, fh
+            )
     else:
         # Create new draft record
         r = requests.post(
@@ -320,60 +530,24 @@ def upload_to_rdm(
         links = r.json()["links"]
         record_id = r.json()["id"]
         print(links)
-
-    # Upload each file individually.
-    # Resolve file links by key (filename), not by index, because API entry order
-    # is not guaranteed to match request order.
-    for file_path in file_paths:
-        filename = os.path.basename(file_path)
-        r = requests.post(
-            links["files"],
-            data=json.dumps([{"key": filename}]),
-            headers=h,
-        )
-        assert r.status_code == 201, (
-            f"Failed to initialize file {filename} (code: {r.status_code}) "
-            f"response: {r.text[:300]}"
-        )
-
-        entries = r.json().get("entries", [])
-        file_entry = next(
-            (entry for entry in entries if entry.get("key") == filename),
-            None,
-        )
-        if file_entry is None and len(entries) == 1:
-            # Backward-compatibility for older payload shapes.
-            file_entry = entries[0]
-        assert (
-            file_entry is not None
-        ), f"Failed to locate initialized entry for {filename} in response."
-        file_links = file_entry.get("links", {})
-        assert (
-            "content" in file_links and "commit" in file_links
-        ), f"Missing upload/commit links for {filename}."
-
-        # Upload file content by streaming the data
-        with open(file_path, "rb") as fp:
-            r = requests.put(
-                file_links["content"],
-                data=fp,
-                headers=fh,
+        # Keep current per-file initialization behavior for new records.
+        for file_path in local_file_paths:
+            filename = file_path.name
+            r = requests.post(
+                links["files"],
+                data=json.dumps([{"key": filename}]),
+                headers=h,
             )
-        assert (
-            r.status_code == 200
-        ), f"Failed to upload file content {filename} (code: {r.status_code})"
-
-        # Commit the file.
-        r = requests.post(file_links["commit"], headers=h)
-        if r.status_code != 200:
-            print(
-                f"[WARN] Commit failed for {filename} (code: {r.status_code}); retrying once."
+            assert r.status_code == 201, (
+                f"Failed to initialize file {filename} (code: {r.status_code}) "
+                f"response: {r.text[:300]}"
             )
-            r = requests.post(file_links["commit"], headers=h)
-        assert r.status_code == 200, (
-            f"Failed to commit file {filename} (code: {r.status_code}) "
-            f"response: {r.text[:300]}"
-        )
+            _upload_initialized_files(
+                r.json().get("entries", []),
+                [file_path],
+                h,
+                fh,
+            )
 
     # Add to E-LAUTE community review (new records only).
     if new_upload:
@@ -407,22 +581,57 @@ def upload_to_rdm(
             r.status_code == 201
         ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
 
-    # Submit draft for review (all records).
-    r = requests.post(
-        f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
-        headers=h,
-    )
-    if not r.status_code == 202:
-        print(
-            f"Failed to submit review for record {record_id} (code: {r.status_code})"
+    if new_upload:
+        # Submit new records to community review.
+        r = requests.post(
+            f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
+            headers=h,
         )
-        failed_uploads.append(elaute_id)
-        return failed_uploads
-
-    print(
-        "[INFO] Draft upload complete and submitted for review."
-        f"Draft: {RDM_API_URL}/uploads/{record_id}"
-    )
+        if r.status_code != 202:
+            print(
+                "Failed to submit review for record "
+                f"{record_id} (code: {r.status_code})"
+            )
+            failed_uploads.append(elaute_id)
+            return failed_uploads
+        print(
+            "[INFO] Draft upload complete and submitted for review. "
+            f"Draft: {RDM_API_URL}/uploads/{record_id}"
+        )
+    else:
+        if files_changed:
+            # Updates with file changes must go to review.
+            r = requests.post(
+                f"{RDM_API_URL}/records/{record_id}/draft/actions/submit-review",
+                headers=h,
+            )
+            if r.status_code != 202:
+                print(
+                    "Failed to submit review for record "
+                    f"{record_id} (code: {r.status_code})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
+            print(
+                "[INFO] Update upload with file changes submitted for review. "
+                f"Draft: {RDM_API_URL}/uploads/{record_id}"
+            )
+        else:
+            # Metadata-only updates can be published directly.
+            r = requests.post(
+                f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+                headers=h,
+            )
+            if r.status_code != 202:
+                print(
+                    f"Failed to publish record {record_id} (code: {r.status_code})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
+            print(
+                "[INFO] Metadata-only update published directly. "
+                f"Record: {RDM_API_URL}/records/{record_id}"
+            )
 
     return failed_uploads
 
