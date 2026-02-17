@@ -23,7 +23,6 @@ The script will:
 """
 
 import os
-import glob
 import json
 import re
 import shutil
@@ -67,6 +66,10 @@ GOOGLE_DRIVE_DIR = os.getenv("AUDIO_UPLOAD_FORM_DRIVE_DIR_JULIA")
 GOOGLE_DRIVE_OWNER = "Julia Jaklin"
 
 
+def _as_path(path_like):
+    return path_like if isinstance(path_like, Path) else Path(path_like)
+
+
 def setup_config():
     global RDM_API_URL
     global RDM_TOKEN
@@ -98,32 +101,35 @@ def setup_config():
 
 
 def remove_string_from_filenames(root_dir, string_to_remove):
-    for dirpath, _dirnames, filenames in os.walk(root_dir):
-        for filename in filenames:
-            if string_to_remove in filename:
-                new_filename = filename.replace(string_to_remove, "")
-                old_file_path = os.path.join(dirpath, filename)
-                new_file_path = os.path.join(dirpath, new_filename)
-                os.rename(old_file_path, new_file_path)
+    root_path = _as_path(root_dir)
+    for file_path in root_path.rglob("*"):
+        if file_path.is_file() and string_to_remove in file_path.name:
+            new_filename = file_path.name.replace(string_to_remove, "")
+            file_path.rename(file_path.with_name(new_filename))
 
 
 def copy_drive_files():
-    audio_files_folder_path = (
+    audio_files_folder_path = Path(
         f"drive_files/audio_files_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     )
+    if not GOOGLE_DRIVE_DIR:
+        raise ValueError(
+            "Environment variable AUDIO_UPLOAD_FORM_DRIVE_DIR_JULIA is not set."
+        )
+    google_drive_root = _as_path(GOOGLE_DRIVE_DIR)
     google_drive_audio_folder = (
-        f"{GOOGLE_DRIVE_DIR}/"
-        "E-LAUTE audio file and metadata upload (File responses)"
+        google_drive_root
+        / "E-LAUTE audio file and metadata upload (File responses)"
     )
 
-    os.makedirs(audio_files_folder_path, exist_ok=True)
+    audio_files_folder_path.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
         google_drive_audio_folder, audio_files_folder_path, dirs_exist_ok=True
     )
 
     google_sheet_path = (
-        f"{GOOGLE_DRIVE_DIR}/"
-        "E-LAUTE audio file and metadata upload (Responses).gsheet"
+        google_drive_root
+        / "E-LAUTE audio file and metadata upload (Responses).gsheet"
     )
     shutil.copy2(google_sheet_path, audio_files_folder_path)
 
@@ -134,11 +140,11 @@ def copy_drive_files():
     }
 
     for old_name, new_name in folder_name_mapping.items():
-        old_path = os.path.join(audio_files_folder_path, old_name)
-        new_path = os.path.join(audio_files_folder_path, new_name)
+        old_path = audio_files_folder_path / old_name
+        new_path = audio_files_folder_path / new_name
 
-        if os.path.exists(old_path):
-            os.rename(old_path, new_path)
+        if old_path.exists():
+            old_path.rename(new_path)
         else:
             print(f"Folder not found: {old_path}, probably already renamed.")
 
@@ -146,7 +152,8 @@ def copy_drive_files():
 
 
 def load_form_responses(audio_files_folder_path):
-    with open(f"{audio_files_folder_path}/responses.gsheet") as f:
+    responses_path = _as_path(audio_files_folder_path) / "responses.gsheet"
+    with responses_path.open() as f:
         content = f.read()
 
     sheet_id = json.loads(content).get("doc_id")
@@ -210,36 +217,92 @@ def clean_work_ids(form_responses_df):
 
 
 def load_id_table():
-    id_table_path = ROOT_DIR / "tables" / "id_table.xlsx"
-    if not id_table_path.exists():
-        raise FileNotFoundError(
-            "Could not find id_table.xlsx. "
-            "Expected in scripts/upload_to_RDM/tables/."
+    def _pick_column(df, choices):
+        for col in choices:
+            if col in df.columns:
+                return col
+        return None
+
+    def _normalize_id_table(raw_df):
+        work_col = _pick_column(raw_df, ["work_id", "IDs"])
+        title_col = _pick_column(raw_df, ["title", "Title"])
+        fol_col = _pick_column(raw_df, ["fol_or_p", "fol", "folio_or_page"])
+
+        missing = []
+        if work_col is None:
+            missing.append("work_id/IDs")
+        if title_col is None:
+            missing.append("title")
+        if fol_col is None:
+            missing.append("fol_or_p")
+        if missing:
+            raise KeyError(
+                "ID table is missing required columns: " + ", ".join(missing)
+            )
+
+        id_table = pd.DataFrame()
+        id_table["work_id"] = (
+            raw_df[work_col].astype("string").str.strip().replace("", pd.NA)
         )
-    id_excel_df = pd.read_excel(id_table_path)
-    id_table = pd.DataFrame()
-    id_table["work_id"] = id_excel_df["IDs"]
-    id_table["title"] = id_excel_df["title"]
-    id_table["fol_or_p"] = id_excel_df["fol_or_p"]
-    return id_table
+        id_table["title"] = (
+            raw_df[title_col].astype("string").str.strip().replace("", pd.NA)
+        )
+        id_table["fol_or_p"] = (
+            raw_df[fol_col].astype("string").str.strip().replace("", pd.NA)
+        )
+
+        id_table = id_table.dropna(subset=["work_id"])
+        return id_table
+
+    id_csv_path = ROOT_DIR / "tables" / "id_table.csv"
+    if not id_csv_path.exists():
+        raise FileNotFoundError(
+            "Could not find id_table.csv. "
+            "Generate it via "
+            "'python scripts/upload_to_RDM/build_tables_from_dump.py <path_to_dump.sql>'."
+        )
+
+    print(f"Loading ID table from CSV: {id_csv_path}")
+    id_csv_df = pd.read_csv(id_csv_path, dtype="string")
+    return _normalize_id_table(id_csv_df)
 
 
 def load_sources_table():
-    sources_table_path = ROOT_DIR / "tables" / "sources_table.xlsx"
-    if not sources_table_path.exists():
+    sources_csv_path = ROOT_DIR / "tables" / "sources_table.csv"
+    if not sources_csv_path.exists():
         raise FileNotFoundError(
-            "Could not find sources_table.xlsx. "
-            "Expected in scripts/upload_to_RDM/tables/."
+            "Could not find sources_table.csv. "
+            "Expected in scripts/upload_to_RDM/tables/. "
+            "Generate it via "
+            "'python scripts/upload_to_RDM/build_tables_from_dump.py <path_to_dump.sql>'."
         )
-    sources_excel_df = pd.read_excel(sources_table_path)
+
+    print(f"Loading sources table from CSV: {sources_csv_path}")
+    sources_df = pd.read_csv(sources_csv_path, dtype="string")
+    required_columns = [
+        "ID",
+        "Shelfmark",
+        "Title",
+        "Source_link",
+        "RISM_link",
+        "VD_16",
+    ]
+    missing = [col for col in required_columns if col not in sources_df.columns]
+    if missing:
+        raise KeyError(
+            "sources_table.csv is missing required columns: "
+            + ", ".join(missing)
+        )
+
     sources_table = pd.DataFrame()
-    sources_table["source_id"] = sources_excel_df["ID"].fillna(
-        sources_excel_df["Shelfmark"]
+    source_id_series = sources_df["ID"].replace(r"^\s*$", pd.NA, regex=True)
+    sources_table["source_id"] = source_id_series.fillna(
+        sources_df["Shelfmark"]
     )
-    sources_table["Title"] = sources_excel_df["Title"]
-    sources_table["Source_link"] = sources_excel_df["Source_link"].fillna("")
-    sources_table["RISM_link"] = sources_excel_df["RISM_link"].fillna("")
-    sources_table["VD_16"] = sources_excel_df["VD_16"].fillna("")
+    sources_table["Title"] = sources_df["Title"]
+    sources_table["Source_link"] = sources_df["Source_link"].fillna("")
+    sources_table["RISM_link"] = sources_df["RISM_link"].fillna("")
+    sources_table["VD_16"] = sources_df["VD_16"].fillna("")
     return sources_table
 
 
@@ -330,12 +393,11 @@ def build_metadata_for_upload(merged_df):
 
 
 def rename_audio_files(metadata_for_upload, audio_files_folder_path):
-    release_folder = os.path.join(audio_files_folder_path, "release")
+    release_folder = _as_path(audio_files_folder_path) / "release"
     all_audio_files = []
-    if os.path.exists(release_folder):
-        for filename in os.listdir(release_folder):
-            file_path = os.path.join(release_folder, filename)
-            if os.path.isfile(file_path):
+    if release_folder.exists():
+        for file_path in release_folder.iterdir():
+            if file_path.is_file():
                 all_audio_files.append(file_path)
 
     for row in metadata_for_upload.itertuples():
@@ -348,23 +410,23 @@ def rename_audio_files(metadata_for_upload, audio_files_folder_path):
         # special cases because there is an additional space in the work_id in the filename...
         if work_id == "Ger_1533-1_n38":
             matching_file = (
-                os.path.dirname(file_path)
-                + "/Gerle 1533-1, Adieu mes amours, Ger_ 1533-1_n38 - Christian Velasco.wav"
+                release_folder
+                / "Gerle 1533-1, Adieu mes amours, Ger_ 1533-1_n38 - Christian Velasco.wav"
             )
         if work_id == "Ger_1533-1_n42":
             matching_file = (
-                os.path.dirname(file_path)
-                + "/Gerle 1533-1, En lombre, Ger_ 1533-1_n42 - Christian Velasco.wav"
+                release_folder
+                / "Gerle 1533-1, En lombre, Ger_ 1533-1_n42 - Christian Velasco.wav"
             )
         if work_id == "Ger_1533-1_n39":
             matching_file = (
-                os.path.dirname(file_path)
-                + "/Gerle 1533-1, Mile regres, Ger_ 1533-1_n39 - Christian Velasco.wav"
+                release_folder
+                / "Gerle 1533-1, Mile regres, Ger_ 1533-1_n39 - Christian Velasco.wav"
             )
 
         if matching_file is None:
             for file_path in all_audio_files:
-                filename = os.path.basename(file_path)
+                filename = file_path.name
                 if work_id in filename:
                     matching_file = file_path
                     break
@@ -372,25 +434,24 @@ def rename_audio_files(metadata_for_upload, audio_files_folder_path):
         if matching_file:
             new_filename = f"{work_id}_{fol_or_p}_{lastname}_{firstname}.wav"
             new_filename = re.sub(r'[<>:"/\\|?*]', "", new_filename)
-            new_file_path = os.path.join(
-                os.path.dirname(matching_file), new_filename
-            )
-            os.rename(matching_file, new_file_path)
+            new_file_path = matching_file.with_name(new_filename)
+            matching_file.rename(new_file_path)
         else:
             print(f"No file found for work_id: {work_id}")
 
 
 def extract_audio_metadata(folder_path):
-    wav_files = glob.glob(os.path.join(folder_path, "*.wav"))
+    folder = _as_path(folder_path)
+    wav_files = list(folder.glob("*.wav"))
     metadata_list = []
 
     for file_path in wav_files:
-        filename = os.path.basename(file_path)
+        filename = file_path.name
 
         metadata = {
             "filename": filename,
-            "file_path": file_path,
-            "file_size_bytes": os.path.getsize(file_path),
+            "file_path": str(file_path),
+            "file_size_bytes": file_path.stat().st_size,
             "audio_format": None,
             "encoding": None,
             "sample_rate": None,
@@ -415,7 +476,7 @@ def extract_audio_metadata(folder_path):
         }
 
         try:
-            info = WavInfoReader(file_path, bext_encoding="utf-8")
+            info = WavInfoReader(str(file_path), bext_encoding="utf-8")
             audio_format = info.fmt
 
             metadata["audio_format"] = audio_format.audio_format
@@ -479,7 +540,7 @@ def extract_audio_metadata(folder_path):
                     metadata["bext_coding_history"] = info.bext.coding_history
 
             try:
-                f = taglib.File(file_path)
+                f = taglib.File(str(file_path))
                 if f.tags:
                     tags_str = "; ".join(
                         [f"{k}: {', '.join(v)}" for k, v in f.tags.items()]
@@ -504,16 +565,17 @@ def convert_wav_to_mp3(folder_path):
             "conversion (192 kbps VBR)."
         )
 
-    wav_files = glob.glob(os.path.join(folder_path, "*.wav"))
+    folder = _as_path(folder_path)
+    wav_files = list(folder.glob("*.wav"))
     if not wav_files:
-        print(f"No WAV files found in {folder_path} to convert.")
+        print(f"No WAV files found in {folder} to convert.")
         return
 
     for wav_path in wav_files:
-        mp3_path = os.path.splitext(wav_path)[0] + ".mp3"
-        if os.path.exists(mp3_path):
-            if os.path.getmtime(mp3_path) >= os.path.getmtime(wav_path):
-                print(f"MP3 already up-to-date: {os.path.basename(mp3_path)}")
+        mp3_path = wav_path.with_suffix(".mp3")
+        if mp3_path.exists():
+            if mp3_path.stat().st_mtime >= wav_path.stat().st_mtime:
+                print(f"MP3 already up-to-date: {mp3_path.name}")
                 continue
 
         cmd = [
@@ -523,12 +585,12 @@ def convert_wav_to_mp3(folder_path):
             "error",
             "-y",
             "-i",
-            wav_path,
+            str(wav_path),
             "-codec:a",
             "libmp3lame",
             "-q:a",
             str(MP3_VBR_QUALITY),
-            mp3_path,
+            str(mp3_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -677,14 +739,15 @@ def create_json_metadata(row, audio_metadata_df):
 
 
 def create_json_files(df, audio_metadata_df, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
+    output_path = _as_path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     for _index, row in df.iterrows():
         metadata = create_json_metadata(row, audio_metadata_df)
         filename = (
             f"{row['work_id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
         )
-        with open(os.path.join(output_dir, filename), "w") as json_file:
+        with (output_path / filename).open("w") as json_file:
             json.dump(metadata, json_file, indent=4, ensure_ascii=False)
 
 
@@ -694,18 +757,18 @@ def tag_wav_files_with_metadata(folder_path, metadata_df, sources_table):
             return ""
         return str(value)
 
+    folder = _as_path(folder_path)
     for _index, row in metadata_df.iterrows():
         work_id = row["work_id"]
 
-        audio_file_pattern = os.path.join(folder_path, f"{work_id}_*.wav")
-        matching_files = glob.glob(audio_file_pattern)
+        matching_files = list(folder.glob(f"{work_id}_*.wav"))
 
         if matching_files:
             file_path = matching_files[0]
-            filename = os.path.basename(file_path)
+            filename = file_path.name
 
             try:
-                f = taglib.File(file_path)
+                f = taglib.File(str(file_path))
 
                 f.tags["PERFORMER:LUTE"] = [safe_str(row["performer"])]
                 f.tags["TITLE"] = [safe_str(row["title"])]
@@ -955,6 +1018,8 @@ def fill_out_basic_metadata(row, sources_table):
 def upload_new_works_to_RDM(
     metadata_for_upload, audio_files_path, json_metadata_path
 ):
+    audio_dir = _as_path(audio_files_path)
+    json_dir = _as_path(json_metadata_path)
     record_mapping_data = []
     current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -979,17 +1044,9 @@ def upload_new_works_to_RDM(
             }
         )
 
-        audio_files = sorted(
-            glob.glob(os.path.join(audio_files_path, f"{row['work_id']}_*.wav"))
-        )
-        mp3_files = sorted(
-            glob.glob(os.path.join(audio_files_path, f"{row['work_id']}_*.mp3"))
-        )
-        json_files = sorted(
-            glob.glob(
-                os.path.join(json_metadata_path, f"{row['work_id']}_*.json")
-            )
-        )
+        audio_files = sorted(audio_dir.glob(f"{row['work_id']}_*.wav"))
+        mp3_files = sorted(audio_dir.glob(f"{row['work_id']}_*.mp3"))
+        json_files = sorted(json_dir.glob(f"{row['work_id']}_*.json"))
 
         files = []
         if audio_files:
@@ -1001,7 +1058,7 @@ def upload_new_works_to_RDM(
 
         i = 0
         for file_path in files:
-            data = json.dumps([{"key": os.path.basename(file_path)}])
+            data = json.dumps([{"key": file_path.name}])
             r = requests.post(links["files"], data=data, headers=h)
             assert (
                 r.status_code == 201
@@ -1009,7 +1066,7 @@ def upload_new_works_to_RDM(
             file_links = r.json()["entries"][i]["links"]
             i += 1
 
-            with open(file_path, "rb") as fp:
+            with file_path.open("rb") as fp:
                 r = requests.put(file_links["content"], data=fp, headers=fh)
             assert (
                 r.status_code == 200
@@ -1082,6 +1139,8 @@ def get_existing_records_by_work_id():
 def update_records_in_RDM(
     metadata_for_upload, audio_files_path, json_metadata_path
 ):
+    audio_dir = _as_path(audio_files_path)
+    json_dir = _as_path(json_metadata_path)
     current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updated_records = []
     existing_records = get_existing_records_by_work_id()
@@ -1125,7 +1184,7 @@ def update_records_in_RDM(
             print("Could not verify remote files; assuming changes exist.")
             return True
 
-        local_names = {os.path.basename(path) for path in local_files}
+        local_names = {path.name for path in local_files}
         remote_names = set(remote_info.keys())
 
         if local_names != remote_names:
@@ -1138,12 +1197,12 @@ def update_records_in_RDM(
             return True
 
         for path in local_files:
-            name = os.path.basename(path)
+            name = path.name
             remote = remote_info.get(name, {})
             remote_size = remote.get("size")
 
             if remote_size is not None:
-                if not compare_hashed_files(remote_size, os.path.getsize(path)):
+                if not compare_hashed_files(remote_size, path.stat().st_size):
                     print(f"Size mismatch for {name}")
                     return True
             else:
@@ -1206,15 +1265,9 @@ def update_records_in_RDM(
                         f"    New: {json.dumps(new_value, indent=2) if new_value else 'None'}"
                     )
 
-            audio_files = sorted(
-                glob.glob(os.path.join(audio_files_path, f"{work_id}_*.wav"))
-            )
-            mp3_files = sorted(
-                glob.glob(os.path.join(audio_files_path, f"{work_id}_*.mp3"))
-            )
-            json_files = sorted(
-                glob.glob(os.path.join(json_metadata_path, f"{work_id}_*.json"))
-            )
+            audio_files = sorted(audio_dir.glob(f"{work_id}_*.wav"))
+            mp3_files = sorted(audio_dir.glob(f"{work_id}_*.mp3"))
+            json_files = sorted(json_dir.glob(f"{work_id}_*.json"))
             local_files = []
             if audio_files:
                 local_files.extend(audio_files)
@@ -1276,7 +1329,7 @@ def update_records_in_RDM(
 
                 files = local_files
 
-                file_entries = [{"key": os.path.basename(f)} for f in files]
+                file_entries = [{"key": f.name} for f in files]
                 data = json.dumps(file_entries)
                 r = requests.post(
                     f"{RDM_API_URL}/records/{new_record_id}/draft/files",
@@ -1294,7 +1347,7 @@ def update_records_in_RDM(
 
                 for i, file_path in enumerate(files):
                     file_links = file_responses[i]["links"]
-                    with open(file_path, "rb") as fp:
+                    with file_path.open("rb") as fp:
                         r = requests.put(
                             file_links["content"], data=fp, headers=fh
                         )
@@ -1543,10 +1596,10 @@ def main():
 
     rename_audio_files(metadata_for_upload, audio_files_folder_path)
 
-    release_folder = os.path.join(audio_files_folder_path, "release")
+    release_folder = _as_path(audio_files_folder_path) / "release"
     audio_metadata_df = extract_audio_metadata(release_folder)
 
-    json_folder_path = "json_metadata_files/" + datetime.now().strftime(
+    json_folder_path = Path("json_metadata_files") / datetime.now().strftime(
         "%Y%m%d%H%M%S"
     )
     create_json_files(metadata_for_upload, audio_metadata_df, json_folder_path)
@@ -1557,7 +1610,7 @@ def main():
 
     convert_wav_to_mp3(release_folder)
 
-    audio_files_path = audio_files_folder_path + "/release"
+    audio_files_path = _as_path(audio_files_folder_path) / "release"
     json_metadata_path = json_folder_path
 
     new_ids, existing_ids = process_work_ids(

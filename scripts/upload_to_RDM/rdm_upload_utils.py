@@ -7,6 +7,7 @@ import os
 import json
 import hashlib
 import argparse
+from pathlib import Path
 
 import pandas as pd
 
@@ -89,9 +90,50 @@ def make_html_link(url):
     return f'<a href="{url}" target="_blank">{url}</a>'
 
 
-# Utility: look up source title (stub, replace with actual lookup if needed)
+def load_sources_table_csv(
+    sources_csv_path="scripts/upload_to_RDM/tables/sources_table.csv",
+):
+    """
+    Load and normalize sources_table.csv generated from the Schoenberg dump.
+    """
+    csv_path = Path(sources_csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Could not find sources table CSV at {csv_path}. "
+            "Generate it via "
+            "'python scripts/upload_to_RDM/build_tables_from_dump.py <path_to_dump.sql>'."
+        )
+
+    sources_df = pd.read_csv(csv_path, dtype="string")
+    required_columns = [
+        "ID",
+        "Shelfmark",
+        "Title",
+        "Source_link",
+        "RISM_link",
+        "VD_16",
+    ]
+    missing = [col for col in required_columns if col not in sources_df.columns]
+    if missing:
+        raise KeyError(
+            "sources_table.csv is missing required columns: "
+            + ", ".join(missing)
+        )
+
+    sources_table = pd.DataFrame()
+    source_id_series = sources_df["ID"].replace(r"^\s*$", pd.NA, regex=True)
+    sources_table["source_id"] = source_id_series.fillna(
+        sources_df["Shelfmark"]
+    )
+    sources_table["Title"] = sources_df["Title"]
+    sources_table["Source_link"] = sources_df["Source_link"].fillna("")
+    sources_table["RISM_link"] = sources_df["RISM_link"].fillna("")
+    sources_table["VD_16"] = sources_df["VD_16"].fillna("")
+    return sources_table
+
+
+# Utility: look up source title in csv created from dump of e-lautedb
 def look_up_source_title(sources_table, source_id):
-    # This should look up the title from a table or database; placeholder:
     title_series = sources_table.loc[
         sources_table["source_id"] == source_id, "Title"
     ]
@@ -102,18 +144,24 @@ def look_up_source_title(sources_table, source_id):
 
 # Utility: look up source links (stub, replace with actual lookup if needed)
 def look_up_source_links(sources_table, source_id):
-    source_link = sources_table.loc[
+    source_link_series = sources_table.loc[
         sources_table["source_id"] == source_id,
         "Source_link",
-    ].values[0]
-    rism = sources_table.loc[
+    ]
+    rism_series = sources_table.loc[
         sources_table["source_id"] == source_id,
         "RISM_link",
-    ].values[0]
-    vd16 = sources_table.loc[
+    ]
+    vd16_series = sources_table.loc[
         sources_table["source_id"] == source_id,
         "VD_16",
-    ].values[0]
+    ]
+
+    source_link = (
+        source_link_series.iloc[0] if not source_link_series.empty else ""
+    )
+    rism = rism_series.iloc[0] if not rism_series.empty else ""
+    vd16 = vd16_series.iloc[0] if not vd16_series.empty else ""
 
     links = []
     if source_link:
@@ -296,13 +344,13 @@ def upload_to_rdm(
         if file_entry is None and len(entries) == 1:
             # Backward-compatibility for older payload shapes.
             file_entry = entries[0]
-        assert file_entry is not None, (
-            f"Failed to locate initialized entry for {filename} in response."
-        )
+        assert (
+            file_entry is not None
+        ), f"Failed to locate initialized entry for {filename} in response."
         file_links = file_entry.get("links", {})
-        assert "content" in file_links and "commit" in file_links, (
-            f"Missing upload/commit links for {filename}."
-        )
+        assert (
+            "content" in file_links and "commit" in file_links
+        ), f"Missing upload/commit links for {filename}."
 
         # Upload file content by streaming the data
         with open(file_path, "rb") as fp:
@@ -372,7 +420,7 @@ def upload_to_rdm(
         return failed_uploads
 
     print(
-        "[INFO] Draft upload complete and submitted for review; publish skipped. "
+        "[INFO] Draft upload complete and submitted for review."
         f"Draft: {RDM_API_URL}/uploads/{record_id}"
     )
 
