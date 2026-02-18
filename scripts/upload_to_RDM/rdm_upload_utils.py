@@ -603,8 +603,6 @@ def upload_to_rdm(
     print(f"Processing {elaute_id}: {len(local_file_paths)} files")
     h, fh = set_headers(RDM_API_TOKEN)
 
-    print("record_id:", record_id)
-
     if not new_upload:
         metadata_payload = _extract_metadata_payload(metadata)
         fields_to_compare = [

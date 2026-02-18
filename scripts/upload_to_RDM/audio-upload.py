@@ -52,8 +52,7 @@ pd.set_option("display.max_columns", None)
 ROOT_DIR = Path(__file__).resolve().parent
 
 TESTING_MODE = True
-# TESTING_WORK_ID = "Sotheby_tablature_n01"
-TESTING_WORK_ID = "A-Wn_Mus.Hs._18688_n30"
+TESTING_WORK_ID = "Sotheby_tablature_n36"
 
 MP3_VBR_QUALITY = 2  # LAME VBR ~190-200 kbps (approx. 192 kbps)
 
@@ -75,6 +74,12 @@ def _normalize_work_id_alias(work_id):
     return re.sub(r"^Sotheby_tablature_n(\d+)$", r"Yale_tab_n\1", str(work_id))
 
 
+def _legacy_sotheby_work_id_alias(work_id):
+    if pd.isna(work_id):
+        return work_id
+    return re.sub(r"^Yale_tab_n(\d+)$", r"Sotheby_tablature_n\1", str(work_id))
+
+
 def _normalize_work_id_field(work_id_field):
     if pd.isna(work_id_field):
         return work_id_field
@@ -86,6 +91,12 @@ def _normalize_work_id_field(work_id_field):
     return ", ".join(normalized_ids)
 
 
+def _candidate_work_id_aliases(work_id):
+    normalized = _normalize_work_id_alias(work_id)
+    legacy = _legacy_sotheby_work_id_alias(normalized)
+    return {str(normalized), str(legacy)}
+
+
 def _normalize_for_matching(text):
     return re.sub(r"\s+", "", str(text or "")).lower()
 
@@ -94,7 +105,9 @@ def _filter_metadata_for_testing_work_id(metadata_for_upload):
     if not TESTING_WORK_ID:
         raise ValueError("TESTING_MODE requires TESTING_WORK_ID to be set.")
 
-    normalized_target = _normalize_for_matching(TESTING_WORK_ID)
+    testing_work_id = str(TESTING_WORK_ID)
+    testing_work_id_alias = _normalize_work_id_alias(testing_work_id)
+    normalized_target = _normalize_for_matching(testing_work_id_alias)
     matches = metadata_for_upload[
         metadata_for_upload["work_id"]
         .astype(str)
@@ -107,7 +120,7 @@ def _filter_metadata_for_testing_work_id(metadata_for_upload):
     if matches.empty:
         raise ValueError(
             "TESTING_WORK_ID not found in metadata_for_upload: "
-            f"{TESTING_WORK_ID}"
+            f"{TESTING_WORK_ID} (normalized to {testing_work_id_alias})"
         )
 
     selected = matches.head(1)
@@ -119,9 +132,14 @@ def _filter_metadata_for_testing_work_id(metadata_for_upload):
 def _find_testing_wav_files(release_folder, work_id):
     release_folder = _as_path(release_folder)
     normalized_work_id = _normalize_for_matching(work_id)
+    legacy_normalized_work_id = _normalize_for_matching(
+        _legacy_sotheby_work_id_alias(work_id)
+    )
+    search_terms = {normalized_work_id, legacy_normalized_work_id}
     matches = []
     for wav_path in release_folder.glob("*.wav"):
-        if normalized_work_id in _normalize_for_matching(wav_path.name):
+        normalized_name = _normalize_for_matching(wav_path.name)
+        if any(search_term in normalized_name for search_term in search_terms):
             matches.append(wav_path)
     return sorted(matches)
 
@@ -145,8 +163,6 @@ def setup_config():
         ELAUTE_COMMUNITY_ID = get_id_from_api(
             "https://researchdata.tuwien.ac.at/api/communities/e-laute"
         )
-
-    print(f"Using API URL: {RDM_API_URL}")
 
 
 def remove_string_from_filenames(root_dir, string_to_remove):
@@ -297,6 +313,9 @@ def load_id_table():
         id_table["work_id"] = (
             raw_df[work_col].astype("string").str.strip().replace("", pd.NA)
         )
+        id_table["work_id"] = id_table["work_id"].apply(
+            _normalize_work_id_alias
+        )
         id_table["title"] = (
             raw_df[title_col].astype("string").str.strip().replace("", pd.NA)
         )
@@ -315,7 +334,6 @@ def load_id_table():
             "'python scripts/upload_to_RDM/build_tables_from_dump.py <path_to_dump.sql>'."
         )
 
-    print(f"Loading ID table from CSV: {id_csv_path}")
     id_csv_df = pd.read_csv(id_csv_path, dtype="string")
     return _normalize_id_table(id_csv_df)
 
@@ -330,7 +348,6 @@ def load_sources_table():
             "'python scripts/upload_to_RDM/build_tables_from_dump.py <path_to_dump.sql>'."
         )
 
-    print(f"Loading sources table from CSV: {sources_csv_path}")
     sources_df = pd.read_csv(sources_csv_path, dtype="string")
     required_columns = [
         "ID",
@@ -454,9 +471,6 @@ def build_metadata_df(form_responses_df, id_table):
     if not remaining_missing.empty:
         print("The following work_ids could not be found in id_table:")
         print(remaining_missing["work_id"].tolist())
-    else:
-        print("All work_ids were found in id_table.")
-
     return merged_df
 
 
@@ -490,6 +504,7 @@ def rename_audio_files(
         fol_or_p = row.fol_or_p
         lastname = row.performer_lastname
         firstname = row.performer_firstname
+        work_id_candidates = _candidate_work_id_aliases(work_id)
 
         matching_file = None
         # special cases because there is an additional space in the work_id in the filename...
@@ -512,7 +527,7 @@ def rename_audio_files(
         if matching_file is None:
             for file_path in all_audio_files:
                 filename = file_path.name
-                if work_id in filename:
+                if any(candidate in filename for candidate in work_id_candidates):
                     matching_file = file_path
                     break
 
@@ -671,14 +686,12 @@ def convert_wav_to_mp3(folder_path, target_wav_files=None):
     else:
         wav_files = list(folder.glob("*.wav"))
     if not wav_files:
-        print(f"No WAV files found in {folder} to convert.")
         return
 
     for wav_path in wav_files:
         mp3_path = wav_path.with_suffix(".mp3")
         if mp3_path.exists():
             if mp3_path.stat().st_mtime >= wav_path.stat().st_mtime:
-                print(f"MP3 already up-to-date: {mp3_path.name}")
                 continue
 
         cmd = [
@@ -1149,6 +1162,9 @@ def get_existing_records_by_work_id():
         print("No records with E-LAUTE IDs found in RDM.")
         return {}
 
+    records_df["elaute_id"] = records_df["elaute_id"].apply(
+        _normalize_work_id_alias
+    )
     records_df["updated_dt"] = pd.to_datetime(
         records_df["updated"], errors="coerce"
     )

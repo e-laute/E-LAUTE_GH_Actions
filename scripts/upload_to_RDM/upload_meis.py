@@ -304,10 +304,6 @@ def get_candidate_upload_files():
             for file_path in selected_from_manifest
             if file_path.lower().endswith((".mei", ".ttl"))
         ]
-        print(
-            f"[INFO] Using explicit upload manifest with "
-            f"{len(SELECTED_UPLOAD_FILES)} files."
-        )
         return SELECTED_UPLOAD_FILES
 
     only_converted = os.environ.get("ELAUTE_ONLY_CONVERTED", "0") == "1"
@@ -323,7 +319,6 @@ def get_candidate_upload_files():
             files.append(full_path)
 
     SELECTED_UPLOAD_FILES = list(dict.fromkeys(sorted(files)))
-    print(f"[INFO] Candidate upload files: {len(SELECTED_UPLOAD_FILES)}")
     return SELECTED_UPLOAD_FILES
 
 
@@ -355,9 +350,7 @@ def prepare_upload_file_paths(work_id, upload_file_paths):
 
     temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
     safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
-    zip_path = os.path.join(
-        temp_dir, f"{safe_work_id}_provenance_files.zip"
-    )
+    zip_path = os.path.join(temp_dir, f"{safe_work_id}_provenance_files.zip")
 
     with zipfile.ZipFile(
         zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
@@ -373,7 +366,9 @@ def prepare_upload_file_paths(work_id, upload_file_paths):
             f"got {len(zipped_entries)} in zip."
         )
 
-    prepared_files = [p for p in upload_file_paths if not p.lower().endswith(".ttl")]
+    prepared_files = [
+        p for p in upload_file_paths if not p.lower().endswith(".ttl")
+    ]
     prepared_files = list(dict.fromkeys(prepared_files))
     prepared_files.append(zip_path)
     print(
@@ -634,7 +629,7 @@ def fill_out_basic_metadata_for_work(
                     },
                 }
             ],
-        }
+        },
     }
 
     # Add people as creators and contributors (same logic as before)
@@ -873,11 +868,6 @@ def update_records_in_RDM(work_ids_to_update):
     print(f"   Records checked: {len(work_ids_to_update)}")
     print(f"   Failed updates: {len(failed_updates)}")
 
-    if updated_records:
-        print("\nSuccessfully updated:")
-        for record in updated_records:
-            print(f"   - {record['work_id']} → {record['record_id']}")
-
     if failed_updates:
         print("\nFailed to update:")
         for work_id in failed_updates:
@@ -1017,7 +1007,9 @@ def main() -> int:
             has_failures = True
 
     if len(existing_work_ids) > 0:
-        _updated_records, failed_updates = update_records_in_RDM(existing_work_ids)
+        _updated_records, failed_updates = update_records_in_RDM(
+            existing_work_ids
+        )
         if failed_updates:
             has_failures = True
 
