@@ -27,6 +27,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +52,8 @@ pd.set_option("display.max_columns", None)
 ROOT_DIR = Path(__file__).resolve().parent
 
 TESTING_MODE = True
+# TESTING_WORK_ID = "Sotheby_tablature_n01"
+TESTING_WORK_ID = "A-Wn_Mus.Hs._18688_n30"
 
 MP3_VBR_QUALITY = 2  # LAME VBR ~190-200 kbps (approx. 192 kbps)
 
@@ -78,11 +81,49 @@ def _normalize_work_id_field(work_id_field):
 
     split_ids = [part.strip() for part in str(work_id_field).split(",")]
     normalized_ids = [
-        _normalize_work_id_alias(work_id)
-        for work_id in split_ids
-        if work_id
+        _normalize_work_id_alias(work_id) for work_id in split_ids if work_id
     ]
     return ", ".join(normalized_ids)
+
+
+def _normalize_for_matching(text):
+    return re.sub(r"\s+", "", str(text or "")).lower()
+
+
+def _filter_metadata_for_testing_work_id(metadata_for_upload):
+    if not TESTING_WORK_ID:
+        raise ValueError("TESTING_MODE requires TESTING_WORK_ID to be set.")
+
+    normalized_target = _normalize_for_matching(TESTING_WORK_ID)
+    matches = metadata_for_upload[
+        metadata_for_upload["work_id"]
+        .astype(str)
+        .apply(
+            lambda work_id: _normalize_for_matching(work_id)
+            == normalized_target
+        )
+    ]
+
+    if matches.empty:
+        raise ValueError(
+            "TESTING_WORK_ID not found in metadata_for_upload: "
+            f"{TESTING_WORK_ID}"
+        )
+
+    selected = matches.head(1)
+    selected_work_id = selected.iloc[0]["work_id"]
+    print(f"TESTING mode: selected work_id '{selected_work_id}'")
+    return selected
+
+
+def _find_testing_wav_files(release_folder, work_id):
+    release_folder = _as_path(release_folder)
+    normalized_work_id = _normalize_for_matching(work_id)
+    matches = []
+    for wav_path in release_folder.glob("*.wav"):
+        if normalized_work_id in _normalize_for_matching(wav_path.name):
+            matches.append(wav_path)
+    return sorted(matches)
 
 
 def setup_config():
@@ -426,13 +467,23 @@ def build_metadata_for_upload(merged_df):
     return metadata_for_upload
 
 
-def rename_audio_files(metadata_for_upload, audio_files_folder_path):
+def rename_audio_files(
+    metadata_for_upload, audio_files_folder_path, target_audio_files=None
+):
     release_folder = _as_path(audio_files_folder_path) / "release"
     all_audio_files = []
-    if release_folder.exists():
+    if target_audio_files is not None:
+        all_audio_files = [
+            _as_path(file_path)
+            for file_path in target_audio_files
+            if _as_path(file_path).exists()
+        ]
+    elif release_folder.exists():
         for file_path in release_folder.iterdir():
             if file_path.is_file():
                 all_audio_files.append(file_path)
+
+    renamed_files_by_work_id = {}
 
     for row in metadata_for_upload.itertuples():
         work_id = row.work_id
@@ -469,14 +520,25 @@ def rename_audio_files(metadata_for_upload, audio_files_folder_path):
             new_filename = f"{work_id}_{fol_or_p}_{lastname}_{firstname}.wav"
             new_filename = re.sub(r'[<>:"/\\|?*]', "", new_filename)
             new_file_path = matching_file.with_name(new_filename)
-            matching_file.rename(new_file_path)
+            if matching_file != new_file_path:
+                matching_file.rename(new_file_path)
+            renamed_files_by_work_id[work_id] = new_file_path
         else:
             print(f"No file found for work_id: {work_id}")
 
+    return renamed_files_by_work_id
 
-def extract_audio_metadata(folder_path):
+
+def extract_audio_metadata(folder_path, target_wav_files=None):
     folder = _as_path(folder_path)
-    wav_files = list(folder.glob("*.wav"))
+    if target_wav_files is not None:
+        wav_files = [
+            _as_path(file_path)
+            for file_path in target_wav_files
+            if _as_path(file_path).exists()
+        ]
+    else:
+        wav_files = list(folder.glob("*.wav"))
     metadata_list = []
 
     for file_path in wav_files:
@@ -591,7 +653,7 @@ def extract_audio_metadata(folder_path):
     return pd.DataFrame(metadata_list)
 
 
-def convert_wav_to_mp3(folder_path):
+def convert_wav_to_mp3(folder_path, target_wav_files=None):
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         raise RuntimeError(
@@ -600,7 +662,14 @@ def convert_wav_to_mp3(folder_path):
         )
 
     folder = _as_path(folder_path)
-    wav_files = list(folder.glob("*.wav"))
+    if target_wav_files is not None:
+        wav_files = [
+            _as_path(file_path)
+            for file_path in target_wav_files
+            if _as_path(file_path).exists()
+        ]
+    else:
+        wav_files = list(folder.glob("*.wav"))
     if not wav_files:
         print(f"No WAV files found in {folder} to convert.")
         return
@@ -778,24 +847,36 @@ def create_json_files(df, audio_metadata_df, output_dir):
 
     for _index, row in df.iterrows():
         metadata = create_json_metadata(row, audio_metadata_df)
-        filename = (
-            f"{row['work_id']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-        )
+        filename = f"{row['work_id']}_metadata.json"
         with (output_path / filename).open("w") as json_file:
             json.dump(metadata, json_file, indent=4, ensure_ascii=False)
 
 
-def tag_wav_files_with_metadata(folder_path, metadata_df, sources_table):
+def tag_wav_files_with_metadata(
+    folder_path,
+    metadata_df,
+    sources_table,
+    target_wav_files=None,
+):
     def safe_str(value):
         if pd.isna(value):
             return ""
         return str(value)
 
     folder = _as_path(folder_path)
+    target_wav_names = None
+    if target_wav_files is not None:
+        target_wav_names = {
+            _as_path(file_path).name for file_path in target_wav_files
+        }
     for _index, row in metadata_df.iterrows():
         work_id = row["work_id"]
 
         matching_files = list(folder.glob(f"{work_id}_*.wav"))
+        if target_wav_names is not None:
+            matching_files = [
+                path for path in matching_files if path.name in target_wav_names
+            ]
 
         if matching_files:
             file_path = matching_files[0]
@@ -1103,14 +1184,14 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
     def _collect_upload_files(work_id):
         audio_files = sorted(audio_dir.glob(f"{work_id}_*.wav"))
         mp3_files = sorted(audio_dir.glob(f"{work_id}_*.mp3"))
-        json_files = sorted(json_dir.glob(f"{work_id}_*.json"))
+        json_file = json_dir / f"{work_id}_metadata.json"
         files = []
         if audio_files:
             files.append(audio_files[0])
         if mp3_files:
             files.append(mp3_files[0])
-        if json_files:
-            files.append(json_files[0])
+        if json_file.exists():
+            files.append(json_file)
         return files
 
     failed_uploads = []
@@ -1157,36 +1238,73 @@ def main():
 
     merged_df = build_metadata_df(form_responses_df, id_table)
     metadata_for_upload = build_metadata_for_upload(merged_df)
+    release_folder = _as_path(audio_files_folder_path) / "release"
+    selected_work_id = None
 
     if TESTING_MODE:
-        metadata_for_upload = metadata_for_upload.head(1)
+        metadata_for_upload = _filter_metadata_for_testing_work_id(
+            metadata_for_upload
+        )
+        selected_work_id = metadata_for_upload.iloc[0]["work_id"]
         print(
             "TESTING mode: limiting upload to "
             f"{len(metadata_for_upload)} work_id"
         )
 
-    rename_audio_files(metadata_for_upload, audio_files_folder_path)
+    rename_targets = None
+    if TESTING_MODE:
+        rename_targets = _find_testing_wav_files(
+            release_folder, selected_work_id
+        )
+        if not rename_targets:
+            raise FileNotFoundError(
+                "No WAV file found for TESTING_WORK_ID in release folder: "
+                f"{selected_work_id}"
+            )
 
-    release_folder = _as_path(audio_files_folder_path) / "release"
-    audio_metadata_df = extract_audio_metadata(release_folder)
-
-    json_folder_path = Path("json_metadata_files") / datetime.now().strftime(
-        "%Y%m%d%H%M%S"
+    renamed_files_by_work_id = rename_audio_files(
+        metadata_for_upload,
+        audio_files_folder_path,
+        target_audio_files=rename_targets,
     )
-    create_json_files(metadata_for_upload, audio_metadata_df, json_folder_path)
+
+    target_wav_files = None
+    if TESTING_MODE:
+        renamed_wav = renamed_files_by_work_id.get(selected_work_id)
+        if renamed_wav is None:
+            resolved_wavs = sorted(
+                release_folder.glob(f"{selected_work_id}_*.wav")
+            )
+            if resolved_wavs:
+                renamed_wav = resolved_wavs[0]
+        if renamed_wav is None or not renamed_wav.exists():
+            raise FileNotFoundError(
+                "Could not resolve renamed test WAV file for work_id "
+                f"{selected_work_id}"
+            )
+        target_wav_files = [renamed_wav]
+
+    audio_metadata_df = extract_audio_metadata(
+        release_folder, target_wav_files=target_wav_files
+    )
 
     tag_wav_files_with_metadata(
-        release_folder, metadata_for_upload, sources_table
+        release_folder,
+        metadata_for_upload,
+        sources_table,
+        target_wav_files=target_wav_files,
     )
 
-    convert_wav_to_mp3(release_folder)
+    convert_wav_to_mp3(release_folder, target_wav_files=target_wav_files)
 
     audio_files_path = _as_path(audio_files_folder_path) / "release"
-    json_metadata_path = json_folder_path
-
-    new_ids, existing_ids = process_work_ids(
-        metadata_for_upload, audio_files_path, json_metadata_path
-    )
+    with tempfile.TemporaryDirectory(
+        prefix="elaute_json_metadata_"
+    ) as temp_json_dir:
+        create_json_files(metadata_for_upload, audio_metadata_df, temp_json_dir)
+        new_ids, existing_ids = process_work_ids(
+            metadata_for_upload, audio_files_path, temp_json_dir
+        )
 
     print("\nProcessing complete:")
     print(f"Total work_ids processed: {len(metadata_for_upload)}")
