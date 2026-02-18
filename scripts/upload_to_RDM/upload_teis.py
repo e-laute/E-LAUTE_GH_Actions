@@ -381,7 +381,7 @@ def fill_out_basic_metadata(metadata_row, people_df, corporate_df):
                     "description": {
                         "en": "Permits almost any use subject to providing credit and license notice. Frequently used for media assets and educational materials. The most common license for Open Access scientific publications. Not recommended for software."
                     },
-                    "icon": "cc-by-sa-icon",
+                    # "icon": "cc-by-sa-icon",
                     "id": "cc-by-sa-4.0",
                     "props": {
                         "scheme": "spdx",

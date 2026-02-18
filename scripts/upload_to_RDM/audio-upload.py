@@ -527,7 +527,9 @@ def rename_audio_files(
         if matching_file is None:
             for file_path in all_audio_files:
                 filename = file_path.name
-                if any(candidate in filename for candidate in work_id_candidates):
+                if any(
+                    candidate in filename for candidate in work_id_candidates
+                ):
                     matching_file = file_path
                     break
 
@@ -1096,7 +1098,7 @@ def fill_out_basic_metadata(row, sources_table):
                             "Not recommended for software."
                         )
                     },
-                    "icon": "cc-by-sa-icon",
+                    # "icon": "cc-by-sa-icon",
                     "id": "cc-by-sa-4.0",
                     "props": {
                         "scheme": "spdx",

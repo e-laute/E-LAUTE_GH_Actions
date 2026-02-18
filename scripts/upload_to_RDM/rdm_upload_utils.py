@@ -12,6 +12,7 @@ from urllib.parse import quote, urlparse
 
 import pandas as pd
 
+
 def get_id_from_api(url):
     """Get community ID from API URL with error handling"""
     try:
@@ -547,6 +548,7 @@ def upload_to_rdm(
     local_file_paths = [Path(path) for path in file_paths]
     print(f"Processing {elaute_id}: {len(local_file_paths)} files")
     h, fh = set_headers(RDM_API_TOKEN)
+    files_changed = False
 
     if not new_upload:
         metadata_payload = _extract_metadata_payload(metadata)
@@ -596,37 +598,62 @@ def upload_to_rdm(
                 f"{elaute_id}; creating new version."
             )
 
-        # Create a new version/draft for the record
-        r = requests.post(
-            f"{RDM_API_URL}/records/{record_id}/versions",
-            headers=h,
-        )
-        if r.status_code != 201:
-            print(
-                f"Failed to create new version for record {record_id} (code: {r.status_code})"
+        if files_changed:
+            # File changes require a new version draft.
+            r = requests.post(
+                f"{RDM_API_URL}/records/{record_id}/versions",
+                headers=h,
             )
-            failed_uploads.append(elaute_id)
-            return failed_uploads  # Stop further processing
+            if r.status_code != 201:
+                print(
+                    "Failed to create new version for record "
+                    f"{record_id} (code: {r.status_code})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
 
-        new_version_data = r.json()
-        new_record_id = new_version_data["id"]
-        print(f"Created new version {new_record_id} for elaute_id {elaute_id}")
+            new_record_id = r.json()["id"]
+            print(
+                f"Created new version {new_record_id} for elaute_id {elaute_id}"
+            )
+            record_id = new_record_id
 
-        # Update the draft with new metadata
+            # Explicitly enter draft edit mode for the new version draft.
+            r = requests.post(
+                f"{RDM_API_URL}/records/{record_id}/draft",
+                headers=h,
+            )
+            if r.status_code not in (200, 201):
+                print(
+                    f"Failed to enter edit mode for draft {record_id} "
+                    f"(code: {r.status_code})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
+        else:
+            # Metadata-only updates edit the currently published record draft.
+            r = requests.post(
+                f"{RDM_API_URL}/records/{record_id}/draft",
+                headers=h,
+            )
+            if r.status_code not in (200, 201):
+                print(
+                    f"Failed to enter edit mode for draft {record_id} "
+                    f"(code: {r.status_code})"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
+
         r = requests.put(
-            f"{RDM_API_URL}/records/{new_record_id}/draft",
+            f"{RDM_API_URL}/records/{record_id}/draft",
             data=json.dumps(metadata),
             headers=h,
         )
         if r.status_code != 200:
-            print(
-                f"Failed to update draft {new_record_id} (code: {r.status_code})"
-            )
+            print(f"Failed to update draft {record_id} (code: {r.status_code})")
             failed_uploads.append(elaute_id)
             return failed_uploads
 
-        # Use new_record_id for subsequent steps
-        record_id = new_record_id
         # Get links from the draft update response
         links = r.json()["links"]
 
@@ -727,16 +754,43 @@ def upload_to_rdm(
             f"Draft: {RDM_API_URL}/uploads/{record_id}"
         )
     else:
-        # Keep updates as drafts only.
-        if files_changed:
+        # Publish update workflow:
+        # - metadata-only: edit draft -> update metadata -> publish
+        # - file changes: create version -> update metadata/files -> publish -> submit-review
+        r = requests.post(
+            f"{records_api_url}/{record_id}/draft/actions/publish",
+            headers=h,
+        )
+        if r.status_code not in (200, 201, 202):
             print(
-                "[INFO] Update draft saved with file changes. "
-                f"Draft: {RDM_API_URL}/uploads/{record_id}"
+                "Failed to publish updated record "
+                f"{record_id} (code: {r.status_code}) "
+                f"response: {r.text[:300]}"
+            )
+            failed_uploads.append(elaute_id)
+            return failed_uploads
+
+        if files_changed:
+            r = requests.post(
+                f"{records_api_url}/{record_id}/draft/actions/submit-review",
+                headers=h,
+            )
+            if r.status_code != 202:
+                print(
+                    "Failed to submit review for updated record "
+                    f"{record_id} (code: {r.status_code}) "
+                    f"response: {r.text[:300]}"
+                )
+                failed_uploads.append(elaute_id)
+                return failed_uploads
+            print(
+                "[INFO] New version with file changes published and submitted for review. "
+                f"Record: {RDM_API_URL}/records/{record_id}"
             )
         else:
             print(
-                "[INFO] Metadata-only update draft saved. "
-                f"Draft: {RDM_API_URL}/uploads/{record_id}"
+                "[INFO] Metadata-only update published. "
+                f"Record: {RDM_API_URL}/records/{record_id}"
             )
 
     return failed_uploads
