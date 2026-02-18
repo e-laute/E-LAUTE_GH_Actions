@@ -871,7 +871,6 @@ def update_records_in_RDM(work_ids_to_update):
     # Summary
     print("\nUPDATE SUMMARY:")
     print(f"   Records checked: {len(work_ids_to_update)}")
-    print(f"   Records updated: {len(updated_records)}")
     print(f"   Failed updates: {len(failed_updates)}")
 
     if updated_records:
@@ -1021,6 +1020,9 @@ def main() -> int:
         _updated_records, failed_updates = update_records_in_RDM(existing_work_ids)
         if failed_updates:
             has_failures = True
+
+    if len(existing_work_ids) > 0:
+        print("\nPlease submit for review again on the RDM platform.")
 
     return 1 if has_failures else 0
 
