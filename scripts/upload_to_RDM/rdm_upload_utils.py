@@ -12,9 +12,6 @@ from urllib.parse import quote, urlparse
 
 import pandas as pd
 
-# from pathlib import Path
-
-
 def get_id_from_api(url):
     """Get community ID from API URL with error handling"""
     try:
@@ -30,8 +27,6 @@ def setup_for_rdm_api_access(TESTING_MODE=True):
 
     # TODO: remove need for mapping file and url list
     # fetch that info from RDM
-
-    TESTING_MODE = TESTING_MODE  # Set to False for production
 
     # see Stackoverflow: https://stackoverflow.com/a/66593457 about use in GitHub Actions
     # variable/secret needs to be passed in the GitHub Action
@@ -268,8 +263,6 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
             if ident.get("scheme") == "other":
                 elaute_id = ident.get("identifier")
                 break
-        # if not elaute_id:
-        # print(f"Unknown E-LAUTE ID for record {record_id}")
         records.append(
             {
                 "elaute_id": elaute_id,
@@ -441,54 +434,6 @@ def _upload_initialized_files(
             f"Failed to commit file {filename} (code: {response.status_code}) "
             f"response: {response.text[:300]}"
         )
-
-
-def _ensure_community_review_request(
-    record_id, headers, api_url, community_id, failed_uploads, elaute_id
-):
-    if not community_id:
-        print(
-            "ELAUTE_COMMUNITY_ID is not set; cannot submit review for "
-            f"record {record_id}."
-        )
-        failed_uploads.append(elaute_id)
-        return False
-
-    response = requests.put(
-        f"{api_url}/records/{record_id}/draft/review",
-        headers=headers,
-        data=json.dumps(
-            {
-                "receiver": {"community": community_id},
-                "type": "community-submission",
-            }
-        ),
-    )
-    if response.status_code != 200:
-        print(
-            "Failed to set review for record "
-            f"{record_id} (code: {response.status_code}) "
-            f"response: {response.text[:300]}"
-        )
-        failed_uploads.append(elaute_id)
-        return False
-    return True
-
-
-def _submit_review(record_id, headers, api_url, failed_uploads, elaute_id):
-    response = requests.post(
-        f"{api_url}/records/{record_id}/draft/actions/submit-review",
-        headers=headers,
-    )
-    if response.status_code != 202:
-        print(
-            "Failed to submit review for record "
-            f"{record_id} (code: {response.status_code}) "
-            f"response: {response.text[:300]}"
-        )
-        failed_uploads.append(elaute_id)
-        return False
-    return True
 
 
 def _sync_draft_files_with_local(
@@ -684,7 +629,6 @@ def upload_to_rdm(
         record_id = new_record_id
         # Get links from the draft update response
         links = r.json()["links"]
-        record_id = r.json()["id"]
 
         # If file differences were detected, start from previous-version files
         # and only apply local delta.
