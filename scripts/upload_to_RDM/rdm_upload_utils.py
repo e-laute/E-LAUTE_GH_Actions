@@ -8,7 +8,7 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import pandas as pd
 
@@ -502,6 +502,100 @@ def _submit_review(
     return True
 
 
+def _sync_draft_files_with_local(
+    record_id,
+    local_file_paths,
+    links,
+    headers,
+    file_headers,
+    api_url,
+):
+    """
+    Start from previous-version files, then apply local delta:
+    - keep unchanged files
+    - delete removed files from draft
+    - re-upload only new/changed files
+    """
+    response = requests.post(
+        f"{api_url}/records/{record_id}/draft/actions/files-import",
+        headers=headers,
+    )
+    assert response.status_code in (200, 201), (
+        "Failed to import files from previous version for record "
+        f"{record_id} (code: {response.status_code}) "
+        f"response: {response.text[:300]}"
+    )
+
+    response = requests.get(
+        f"{api_url}/records/{record_id}/draft/files", headers=headers
+    )
+    assert response.status_code == 200, (
+        f"Failed to list draft files for record {record_id} "
+        f"(code: {response.status_code}) response: {response.text[:300]}"
+    )
+    draft_entries = response.json().get("entries", [])
+    draft_files_by_key = {
+        entry.get("key"): entry for entry in draft_entries if entry.get("key")
+    }
+
+    local_names = {path.name for path in local_file_paths}
+    draft_names = set(draft_files_by_key.keys())
+
+    # Remove files that are no longer present locally.
+    for filename in sorted(draft_names - local_names):
+        encoded_filename = quote(filename, safe="")
+        response = requests.delete(
+            f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
+            headers=headers,
+        )
+        assert response.status_code in (200, 204), (
+            f"Failed to delete draft file {filename} from record {record_id} "
+            f"(code: {response.status_code}) response: {response.text[:300]}"
+        )
+
+    files_to_upload = []
+    for file_path in local_file_paths:
+        filename = file_path.name
+        entry = draft_files_by_key.get(filename)
+        if not entry:
+            files_to_upload.append(file_path)
+            continue
+
+        remote_checksum = entry.get("checksum")
+        local_checksum = _calculate_local_md5_checksum(file_path)
+        if not remote_checksum or not compare_hashed_files(
+            remote_checksum, local_checksum
+        ):
+            encoded_filename = quote(filename, safe="")
+            response = requests.delete(
+                f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
+                headers=headers,
+            )
+            assert response.status_code in (200, 204), (
+                f"Failed to replace changed draft file {filename} "
+                f"(code: {response.status_code}) response: {response.text[:300]}"
+            )
+            files_to_upload.append(file_path)
+
+    if files_to_upload:
+        file_entries = [{"key": path.name} for path in files_to_upload]
+        response = requests.post(
+            links["files"],
+            data=json.dumps(file_entries),
+            headers=headers,
+        )
+        assert response.status_code == 201, (
+            f"Failed to initialize files for record {record_id} "
+            f"(code: {response.status_code}) response: {response.text[:300]}"
+        )
+        _upload_initialized_files(
+            response.json().get("entries", []),
+            files_to_upload,
+            headers,
+            file_headers,
+        )
+
+
 def upload_to_rdm(
     metadata,
     elaute_id,
@@ -607,32 +701,16 @@ def upload_to_rdm(
         record_id = r.json()["id"]
         print(links)
 
-        # Only replace draft files when file differences were detected.
+        # If file differences were detected, start from previous-version files
+        # and only apply local delta.
         if files_changed:
-            # Full replacement: remove old draft files, initialize all new files,
-            # then upload and commit each one.
-            r = requests.delete(
-                f"{RDM_API_URL}/records/{record_id}/draft/files",
+            _sync_draft_files_with_local(
+                record_id=record_id,
+                local_file_paths=local_file_paths,
+                links=links,
                 headers=h,
-            )
-            if r.status_code not in (200, 204):
-                print(
-                    "Warning: could not clear draft files for "
-                    f"{record_id} (code: {r.status_code}). Continuing."
-                )
-
-            file_entries = [{"key": path.name} for path in local_file_paths]
-            r = requests.post(
-                links["files"],
-                data=json.dumps(file_entries),
-                headers=h,
-            )
-            assert r.status_code == 201, (
-                f"Failed to initialize files for record {record_id} "
-                f"(code: {r.status_code}) response: {r.text[:300]}"
-            )
-            _upload_initialized_files(
-                r.json().get("entries", []), local_file_paths, h, fh
+                file_headers=fh,
+                api_url=RDM_API_URL,
             )
     else:
         # Create new draft record
@@ -666,7 +744,18 @@ def upload_to_rdm(
                 fh,
             )
 
-    # Add to E-LAUTE community review (new records only).
+    # Create curation request (new records only).
+    if new_upload:
+        r = requests.post(
+            f"{RDM_API_URL}/curations",
+            headers=h,
+            data=json.dumps({"topic": {"record": record_id}}),
+        )
+        assert (
+            r.status_code == 201
+        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
+
+    # Add to E-LAUTE community.
     if new_upload:
         ok = _ensure_community_review_request(
             record_id,
@@ -678,17 +767,6 @@ def upload_to_rdm(
         )
         if not ok:
             return failed_uploads
-
-    # Create curation request (new records only).
-    if new_upload:
-        r = requests.post(
-            f"{RDM_API_URL}/curations",
-            headers=h,
-            data=json.dumps({"topic": {"record": record_id}}),
-        )
-        assert (
-            r.status_code == 201
-        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
 
     if new_upload:
         # Submit new records to community review.
@@ -702,42 +780,27 @@ def upload_to_rdm(
             f"Draft: {RDM_API_URL}/uploads/{record_id}"
         )
     else:
+        # Keep updates as drafts only, but still assign to community.
+        ok = _ensure_community_review_request(
+            record_id,
+            h,
+            RDM_API_URL,
+            ELAUTE_COMMUNITY_ID,
+            failed_uploads,
+            elaute_id,
+        )
+        if not ok:
+            return failed_uploads
+
         if files_changed:
-            # Updates with file changes must go to review.
-            ok = _ensure_community_review_request(
-                record_id,
-                h,
-                RDM_API_URL,
-                ELAUTE_COMMUNITY_ID,
-                failed_uploads,
-                elaute_id,
-            )
-            if not ok:
-                return failed_uploads
-            ok = _submit_review(
-                record_id, h, RDM_API_URL, failed_uploads, elaute_id
-            )
-            if not ok:
-                return failed_uploads
             print(
-                "[INFO] Update upload with file changes submitted for review. "
+                "[INFO] Update draft saved with file changes and assigned to community. "
                 f"Draft: {RDM_API_URL}/uploads/{record_id}"
             )
         else:
-            # Metadata-only updates can be published directly.
-            r = requests.post(
-                f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
-                headers=h,
-            )
-            if r.status_code != 202:
-                print(
-                    f"Failed to publish record {record_id} (code: {r.status_code})"
-                )
-                failed_uploads.append(elaute_id)
-                return failed_uploads
             print(
-                "[INFO] Metadata-only update published directly. "
-                f"Record: {RDM_API_URL}/records/{record_id}"
+                "[INFO] Metadata-only update draft saved and assigned to community. "
+                f"Draft: {RDM_API_URL}/uploads/{record_id}"
             )
 
     return failed_uploads
