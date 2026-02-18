@@ -785,26 +785,15 @@ def upload_to_rdm(
             f"Draft: {RDM_API_URL}/uploads/{record_id}"
         )
     else:
-        # Keep updates as drafts only, but still assign to community.
-        ok = _ensure_community_review_request(
-            record_id,
-            h,
-            RDM_API_URL,
-            ELAUTE_COMMUNITY_ID,
-            failed_uploads,
-            elaute_id,
-        )
-        if not ok:
-            return failed_uploads
-
+        # Keep updates as drafts only.
         if files_changed:
             print(
-                "[INFO] Update draft saved with file changes and assigned to community. "
+                "[INFO] Update draft saved with file changes. "
                 f"Draft: {RDM_API_URL}/uploads/{record_id}"
             )
         else:
             print(
-                "[INFO] Metadata-only update draft saved and assigned to community. "
+                "[INFO] Metadata-only update draft saved. "
                 f"Draft: {RDM_API_URL}/uploads/{record_id}"
             )
 
