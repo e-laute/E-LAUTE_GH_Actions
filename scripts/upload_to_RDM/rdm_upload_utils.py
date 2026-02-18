@@ -180,10 +180,7 @@ def create_related_identifiers(links):
     for link in links:
         normalized_link = _normalize_url_identifier(link)
         if not normalized_link:
-            print(
-                "Skipping non-URL related identifier value: "
-                f"{repr(link)}"
-            )
+            print("Skipping non-URL related identifier value: " f"{repr(link)}")
             continue
         related_identifiers.append(
             {
@@ -406,7 +403,9 @@ def _files_changed_for_update(record_id, local_file_paths, headers, api_url):
     return False
 
 
-def _upload_initialized_files(file_entries, local_file_paths, headers, file_headers):
+def _upload_initialized_files(
+    file_entries, local_file_paths, headers, file_headers
+):
     file_links_by_key = {}
     for entry in file_entries:
         key = entry.get("key")
@@ -476,20 +475,10 @@ def _ensure_community_review_request(
     return True
 
 
-def _submit_review(
-    record_id, headers, api_url, failed_uploads, elaute_id
-):
+def _submit_review(record_id, headers, api_url, failed_uploads, elaute_id):
     response = requests.post(
         f"{api_url}/records/{record_id}/draft/actions/submit-review",
         headers=headers,
-        data=json.dumps(
-            {
-                "payload": {
-                    "content": "Submitted by E-LAUTE automated upload.",
-                    "format": "html",
-                }
-            }
-        ),
     )
     if response.status_code != 202:
         print(
@@ -607,6 +596,7 @@ def upload_to_rdm(
 ):
     metadata = _ensure_elaute_identifier(metadata, elaute_id)
     new_upload = record_id is None
+    records_api_url = f"{RDM_API_URL}/records"
 
     failed_uploads = []
     local_file_paths = [Path(path) for path in file_paths]
@@ -633,9 +623,7 @@ def upload_to_rdm(
 
         r = requests.get(f"{RDM_API_URL}/records/{record_id}", headers=h)
         if r.status_code != 200:
-            print(
-                f"Failed to fetch record {record_id} (code: {r.status_code})"
-            )
+            print(f"Failed to fetch record {record_id} (code: {r.status_code})")
             failed_uploads.append(elaute_id)
             return failed_uploads
 
@@ -699,7 +687,6 @@ def upload_to_rdm(
         # Get links from the draft update response
         links = r.json()["links"]
         record_id = r.json()["id"]
-        print(links)
 
         # If file differences were detected, start from previous-version files
         # and only apply local delta.
@@ -715,7 +702,7 @@ def upload_to_rdm(
     else:
         # Create new draft record
         r = requests.post(
-            f"{RDM_API_URL}/records",
+            records_api_url,
             data=json.dumps(metadata),
             headers=h,
         )
@@ -724,7 +711,6 @@ def upload_to_rdm(
         ), f"Failed to create record (code: {r.status_code})"
         links = r.json()["links"]
         record_id = r.json()["id"]
-        print(links)
         # Keep current per-file initialization behavior for new records.
         for file_path in local_file_paths:
             filename = file_path.name
@@ -744,37 +730,56 @@ def upload_to_rdm(
                 fh,
             )
 
-    # Create curation request (new records only).
     if new_upload:
+        # Set community review request first.
+        r = requests.put(
+            f"{records_api_url}/{record_id}/draft/review",
+            headers=h,
+            data=json.dumps(
+                {
+                    "receiver": {"community": ELAUTE_COMMUNITY_ID},
+                    "type": "community-submission",
+                }
+            ),
+        )
+        if r.status_code != 200:
+            print(
+                "Failed to set review for record "
+                f"{record_id} (code: {r.status_code}) "
+                f"response: {r.text[:300]}"
+            )
+            failed_uploads.append(elaute_id)
+            return failed_uploads
+
+        # Create curation request for the record.
         r = requests.post(
             f"{RDM_API_URL}/curations",
             headers=h,
             data=json.dumps({"topic": {"record": record_id}}),
         )
-        assert (
-            r.status_code == 201
-        ), f"Failed to create curation for record {record_id} (code: {r.status_code})"
-
-    # Add to E-LAUTE community.
-    if new_upload:
-        ok = _ensure_community_review_request(
-            record_id,
-            h,
-            RDM_API_URL,
-            ELAUTE_COMMUNITY_ID,
-            failed_uploads,
-            elaute_id,
-        )
-        if not ok:
+        if r.status_code != 201:
+            print(
+                "Failed to create curation for record "
+                f"{record_id} (code: {r.status_code}) "
+                f"response: {r.text[:300]}"
+            )
+            failed_uploads.append(elaute_id)
             return failed_uploads
 
-    if new_upload:
-        # Submit new records to community review.
-        ok = _submit_review(
-            record_id, h, RDM_API_URL, failed_uploads, elaute_id
+        # Submit community review request.
+        r = requests.post(
+            f"{records_api_url}/{record_id}/draft/actions/submit-review",
+            headers=h,
         )
-        if not ok:
+        if r.status_code != 202:
+            print(
+                "Failed to submit review for record "
+                f"{record_id} (code: {r.status_code}) "
+                f"response: {r.text[:300]}"
+            )
+            failed_uploads.append(elaute_id)
             return failed_uploads
+
         print(
             "[INFO] Draft upload complete and submitted for review. "
             f"Draft: {RDM_API_URL}/uploads/{record_id}"
