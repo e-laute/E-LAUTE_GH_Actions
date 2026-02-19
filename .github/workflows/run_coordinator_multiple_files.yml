@@ -66,7 +66,7 @@ jobs:
           cmd="python shared-actions/scripts/find_files_wrapper.py -w ${{ inputs.workpackage_id }}"
           
           [ -n '${{ inputs.filetype }}' ] && cmd="$cmd -ft ${{ inputs.filetype }}"
-          [ -n '${{ inputs.exclude }}' ]  && cmd="$cmd -e '${{ inputs.exclude }}"'
+          [ -n '${{ inputs.exclude }}' ]  && cmd="$cmd -e '${{ inputs.exclude }}'"
           [ -n '${{ inputs.addargs }}' ]  && cmd="$cmd -a '${{ inputs.addargs }}'"
           
           $cmd
