@@ -44,7 +44,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
     except ImportError as e:
         raise NameError("Unknown module") from e
-    output_message_total = f"Workpackage {workpackage['label']} was succesful. \nSee output of individual sripts or refer to Github Link above for further information.\n\n"
+    output_message_total = ""
     for script in scripts_list:
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
@@ -68,13 +68,25 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
             else:
                 # If it's a different kind of TypeError, re-raise it
                 raise e
+        except RuntimeError as e:
+            output_message_total = (
+                f"Workpackage {workpackage['label']} failed. \nSee output of individual sripts or refer to Github Link above for further information.\n\n"
+                + output_message_total
+                + f"Script {func_name} failed, says:\n{e}\n\nNo further scripts executed and no files changed"
+            )
+            write_to_github_step_and_console(output_message_total)
+            return 1
 
     if workpackage["commitResult"]:
         edit_appInfo(active_dom["dom"], workpackage["label"])
         with open(filepath, "wb") as f:
             tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
-
+    output_message_total = (
+        f"Workpackage {workpackage['label']} was succesful. \nSee output of individual sripts or refer to Github Link above for further information.\n\n"
+        + output_message_total
+    )
     write_to_github_step_and_console(output_message_total)
+    return 0
 
 
 def get_context_doms(filepath: Path):
