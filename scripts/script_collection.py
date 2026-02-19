@@ -123,12 +123,13 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
     explainer = f"""The table shows all filetypes found in the directory of {id_name} or fnf for (file not found)
-    The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number."""
+The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
+"""
     output = "\t".join(
         ["|".join(f) if isinstance(f, tuple) else f for f in output_list]
     )
     message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + output
-    write_to_github_step(message * 5)
+    write_to_github_step(message)
 
     return active_dom
 
