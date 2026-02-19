@@ -1,4 +1,4 @@
-name: Run coordinator script
+name: Run coordinator script on multiple files
 
 on:
   workflow_call:
