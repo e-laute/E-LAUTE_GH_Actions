@@ -106,9 +106,9 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     for dom in doms:
         match dom["notationtype"]:
             case "dipl_GLT":
-                dipl_glt = getmnum(dom["dom"])[0:2]
+                dipl_glt = getmnum(dom["dom"])
             case "dipl_CMN":
-                dipl_CMN = getmnum(dom["dom"])[0:2]
+                dipl_CMN = getmnum(dom["dom"])
             case "ed_GLT":
                 ed_glt = getmnum(dom["dom"])
             case "ed_CMN":
@@ -122,10 +122,13 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     else:
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
-    message = "\t".join(
+    explainer = f"""The table shows all filetypes found in the directory of {id_name} or fnf for (file not found)
+    The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number."""
+    output = "\t".join(
         ["|".join(f) if isinstance(f, tuple) else f for f in output_list]
     )
-    write_to_github_step("File\tdi_GLT\tdi_CMN\ted_GLT\t\ted_CMN\n" + message)
+    message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + output
+    write_to_github_step(message * 5)
 
     return active_dom
 
@@ -140,9 +143,8 @@ def getmnum(root: etree.Element):
 
     return (
         measures[-1].get("n", "no_n"),
-        str(len(measures) - int(len(endings) / 2) - has_pickup),
         str(len(measures)),
-        str(len(measures_invis)),
+        str(len(measures) - int(len(endings) / 2) - has_pickup - len(measures_invis)),
     )
 
 
