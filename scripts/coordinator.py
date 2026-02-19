@@ -165,7 +165,10 @@ def main(workpackage_id: str, filepath: str, addargs: list):
 
     dic_add_args = check_addargs_against_json(parse_addargs(addargs), workpackage)
     # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-    mei_path = Path("caller-repo", filepath)
+    if filepath.startswith("caller-repo"):
+        mei_path = Path(filepath)
+    else:
+        mei_path = Path("caller-repo", filepath)
     # mei_path = Path(filepath)
     print(f"Checking file: {mei_path}")
     if not mei_path.is_file():
