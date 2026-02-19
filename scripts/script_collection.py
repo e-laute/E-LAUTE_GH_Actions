@@ -122,10 +122,11 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     else:
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
-    write_to_github_step(
+    message = (
         "File\tdi_GLT\tdi_CMN\ted_GLT\t\ted_CMN\n"
-        "\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list])
+        "\t".join(["|".join(f) if isinstance(f, tuple) else f for f in output_list]),
     )
+    write_to_github_step(message)
 
     return active_dom
 
