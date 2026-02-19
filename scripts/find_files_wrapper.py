@@ -1,7 +1,6 @@
 import re
 import sys
 import argparse
-from pyprojroot import here
 from pathlib import Path
 import coordinator
 from utils import write_to_github_summary
@@ -97,7 +96,7 @@ if __name__ == "__main__":
     except ValueError:
         parser.error(EXCLUDE_ERROR_MESSAGE)
 
-    root = here()
+    root = Path("caller-repo")
     for root, _, filepaths in root.walk():
         if root_filter(root):
             continue
