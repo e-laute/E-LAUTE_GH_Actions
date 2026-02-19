@@ -1,0 +1,79 @@
+name: Run coordinator script
+
+on:
+  workflow_call:
+    inputs:
+      workpackage_id:
+        description: "The id of the workpackage to be executed"
+        required: true
+        type: string
+      filetype:
+        description: "The filetype of the files to be processed"
+        required: false
+        type: string
+      exclude:
+        description: "The files to be excluded from processing"
+        required: false
+        type: string
+      addargs:
+        description: "Additional arguments required by the workpackage"
+        required: false
+        type: string
+        default: ""
+      commit_message:
+        description: "The commit message"
+        required: true
+        default: "GitHub Action: Apply workpackage to filepath"
+        type: string
+
+jobs:
+  run-shared-script:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout caller repository
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          path: caller-repo
+
+      # 2. Checkout shared repository (this repo)
+      - name: Checkout shared repository
+        uses: actions/checkout@v4
+        with:
+          repository: e-laute/E-LAUTE_GH_Actions
+          ref: main
+          path: shared-actions
+
+      # 3. Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: "shared-actions/scripts/requirements-dispatch.txt"
+
+      # 4. Install dependencies
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r shared-actions/scripts/requirements-dispatch.txt
+
+      # 5. Run the shared script *on the caller repo*
+      - name: Run coordinator script
+        run: |
+          cmd="python shared-actions/scripts/find_files_wrapper.py -w ${{ inputs.workpackage_id }}"
+          
+          [ -n '${{ inputs.filetype }}' ] && cmd="$cmd -ft ${{ inputs.filetype }}"
+          [ -n '${{ inputs.exclude }}' ]  && cmd="$cmd -e '${{ inputs.exclude }}"'
+          [ -n '${{ inputs.addargs }}' ]  && cmd="$cmd -a '${{ inputs.addargs }}'"
+          
+          $cmd
+
+      # 6. Commit changes
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: ${{ inputs.commit_message }}
+          repository: caller-repo

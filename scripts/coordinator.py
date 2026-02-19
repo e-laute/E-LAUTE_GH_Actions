@@ -11,7 +11,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from utils import edit_appInfo, write_to_github_step_and_console
+from utils import edit_appInfo, write_to_console, write_to_github_summary
 
 JSON_TYPE_TO_PYTHON_TYPE = {"Number": int, "String": str}
 
@@ -74,7 +74,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
                 + output_message_total
                 + f"Script {func_name} failed, says:\n{e}\n\nNo further scripts executed and no files changed"
             )
-            write_to_github_step_and_console(output_message_total)
+            write_to_console(output_message_total)
             return 1
 
     if workpackage["commitResult"]:
@@ -85,7 +85,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         f"Workpackage {workpackage['label']} was succesful. \nSee output of individual sripts or refer to Github Link above for further information.\n\n"
         + output_message_total
     )
-    write_to_github_step_and_console(output_message_total)
+    write_to_console(output_message_total)
     return 0
 
 

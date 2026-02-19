@@ -4,6 +4,7 @@ import argparse
 from pyprojroot import here
 from pathlib import Path
 import coordinator
+from utils import write_to_github_summary
 
 FILETYPE_CHOICES = [
     "dipl",
@@ -109,10 +110,13 @@ if __name__ == "__main__":
             if exclude in exclude_files:
                 continue
             print(root / filepath)
-            sys.exit(
+            try:
                 coordinator.main(
                     workpackage_id=args.workpackage_id,
                     filepath=root / filepath,
                     addargs=args.addargs,
                 )
-            )
+            except Exception as e:
+                write_to_github_summary(
+                    f"\n{filepath} wasn't processed due to coordinator raising {e}\n"
+                )

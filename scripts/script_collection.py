@@ -133,6 +133,8 @@ The individual cells show the @n of the last measure, the number of measure elem
     )
     output_message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + content
 
+    write_to_github_summary(content + "\n")
+
     return active_dom, output_message
 
 
