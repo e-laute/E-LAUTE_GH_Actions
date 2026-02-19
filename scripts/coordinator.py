@@ -11,7 +11,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from utils import edit_appInfo
+from utils import edit_appInfo, write_to_github_step_and_console
 
 JSON_TYPE_TO_PYTHON_TYPE = {"Number": int, "String": str}
 
@@ -44,7 +44,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         modules_dic = {mod: importlib.import_module(mod) for mod in modules_list}
     except ImportError as e:
         raise NameError("Unknown module") from e
-
+    output_message_total = f"Workpackage {workpackage['label']} was succesful. \nSee output of individual sripts or refer to Github Link above for further information.\n\n"
     for script in scripts_list:
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
@@ -52,7 +52,12 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
             raise AttributeError(f"Unknown script or wrong module path: {script}")
         # scripts take active_dom:dict, context_dom:list[dict], params:dict
         try:
-            active_dom = current_func(active_dom, context_doms, **params)
+            active_dom, output_message_current = current_func(
+                active_dom, context_doms, **params
+            )
+            output_message_total += (
+                f"Script {func_name} was succesful, says:\n{output_message_current}\n\n"
+            )
         except TypeError as e:
             # "...missing 1 required positional argument: 'x'" -> params was missing key
             if "missing" in str(e):
@@ -70,6 +75,8 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         edit_appInfo(active_dom["dom"], workpackage["label"])
         with open(filepath, "wb") as f:
             tree.write(f, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+
+    write_to_github_step_and_console(output_message_total)
 
 
 def get_context_doms(filepath: Path):

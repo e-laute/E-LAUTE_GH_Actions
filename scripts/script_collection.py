@@ -40,7 +40,8 @@ def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **add
             parent.insert(parent.index(measure) + 1, sb)
 
     active_dom["dom"] = root
-    return active_dom
+    output_message = ""
+    return active_dom, output_message
 
 
 def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
@@ -63,7 +64,8 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
         parent.remove(sb)
 
     active_dom["dom"] = root
-    return active_dom
+    output_message = ""
+    return active_dom, output_message
 
 
 def _template_function(active_dom: dict, context_doms: list, **addargs):
@@ -82,7 +84,8 @@ def _template_function(active_dom: dict, context_doms: list, **addargs):
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
 
     active_dom["dom"] = root
-    return active_dom
+    output_message = ""
+    return active_dom, output_message
 
 
 def compare_mnums(active_dom: dict, context_doms: list, **addargs):
@@ -125,13 +128,12 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     explainer = f"""The table shows all filetypes found in the directory of {id_name} or fnf for (file not found)
 The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
 """
-    output = "\t".join(
+    content = "\t".join(
         ["|".join(f) if isinstance(f, tuple) else f for f in output_list]
     )
-    message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + output
-    write_to_github_step(message)
+    output_message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + content
 
-    return active_dom
+    return active_dom, output_message
 
 
 def getmnum(root: etree.Element):
@@ -251,4 +253,5 @@ def add_header_from_GLT(
     root.insert(0, header)
 
     active_dom["dom"] = root
-    return active_dom
+    output_message = ""
+    return active_dom, output_message
