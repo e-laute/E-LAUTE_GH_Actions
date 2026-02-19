@@ -116,6 +116,4 @@ if __name__ == "__main__":
                     addargs=args.addargs,
                 )
             except Exception as e:
-                write_to_github_summary(
-                    f"\n{filepath} wasn't processed due to coordinator raising {e}\n"
-                )
+                print(f"\n{filepath} wasn't processed due to coordinator raising {e}\n")
