@@ -149,6 +149,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     """
     Parses Arguments, selects file, calls coordinator on files with workpackage
     """
+    print("We are in coodinator.main!")
     # TODO misses -nt --notationtype, -e --exclude
     # For now assumes python coordinator.py filepath workpackage additional arguments
     # TODO check for validity of workpackage x filetype, multiple files

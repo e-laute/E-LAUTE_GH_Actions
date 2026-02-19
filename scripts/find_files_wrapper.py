@@ -108,7 +108,7 @@ if __name__ == "__main__":
                 continue
             if exclude in exclude_files:
                 continue
-            print(root / filepath)
+            print(f"Wrapper calls coordinator.main with{root / filepath}")
             try:
                 coordinator.main(
                     workpackage_id=args.workpackage_id,
