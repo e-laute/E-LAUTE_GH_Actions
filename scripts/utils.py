@@ -12,10 +12,10 @@ ns = {
 
 def write_to_github_step(message: str):
     # might get more complicated!
-    print(message)  # for testing
+    print(format_user_output(message))  # for testing
     with open(os.getenv("GITHUB_STEP_SUMMARY"), "a") as f:
         # f.write(format_user_output(message))
-        f.write(message)
+        f.write(format_user_output(message))
 
 
 def format_user_output(
