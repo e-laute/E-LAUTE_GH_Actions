@@ -55,7 +55,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
             active_dom, output_message_current = current_func(
                 active_dom, context_doms, **params
             )
-            output_message_total += f"Script {func_name} was succesful, says:\n{output_message_current if output_message_current else "[No output_message found]"}\n\n"
+            output_message_total += f"Script {func_name} was succesful{", says:\n"+output_message_current if output_message_current else "."}\n\n"
         except TypeError as e:
             # "...missing 1 required positional argument: 'x'" -> params was missing key
             if "missing" in str(e):

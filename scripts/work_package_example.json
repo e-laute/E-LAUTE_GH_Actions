@@ -26,7 +26,8 @@
     },
     "scripts": [
       "script_collection.add_sbs_every_n",
-      "testing_scripts.runtime_error"
+      "testing_scripts.runtime_error",
+      "script_collection.add_sbs_every_n"
     ],
     "commitResult": true
   },
