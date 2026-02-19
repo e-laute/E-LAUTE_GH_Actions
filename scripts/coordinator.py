@@ -100,7 +100,7 @@ def get_context_doms(filepath: Path):
 
     directory = filepath.parent
     extension = ".mei"
-
+    print(f"Directory of context doms {directory}")
     # 2. Find files with the same extension, excluding the original file, call wrapper
     other_files = [
         parse_and_wrap_dom(f)[0]
