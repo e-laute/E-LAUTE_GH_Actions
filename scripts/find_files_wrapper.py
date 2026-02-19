@@ -112,7 +112,7 @@ if __name__ == "__main__":
             try:
                 coordinator.main(
                     workpackage_id=args.workpackage_id,
-                    filepath=root / filepath,
+                    filepath=str((root / filepath)),
                     addargs=args.addargs,
                 )
             except Exception as e:
