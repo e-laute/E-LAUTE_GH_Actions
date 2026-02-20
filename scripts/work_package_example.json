@@ -50,8 +50,8 @@
   },
   {
     "id": "add_header_from_GLT",
-    "label": "Add Header from ed_GLT",
-    "description": "Adds header from GLT with needed adjustments for ed_CMN",
+    "label": "Add Header from dipl_GLT",
+    "description": "Adds header from dipl GLT with needed adjustments for all other filetypes",
     "userFacing": true,
     "params": {
       "projectstaff": {
@@ -62,7 +62,7 @@
         "default": "typesetter"
       }
     },
-    "scripts": ["script_collection.add_header_from_GLT"],
+    "scripts": ["script_collection.add_header_from_dipl_GLT"],
     "commitResult": true
   },
   {
