@@ -78,19 +78,19 @@ def _template_function(active_dom: dict, context_doms: list, **addargs):
     :type context_doms: list
     :param addargs: Addional arguments that are unused
     """
+    output_message = ""
 
     root = active_dom["dom"]
 
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
 
     active_dom["dom"] = root
-    output_message = ""
     return active_dom, output_message
 
 
 def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     """
-    template function
+    Ouputs number measures and last @n across active and context doms
 
     :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
     :type active_dom: dict
@@ -109,9 +109,9 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     for dom in doms:
         match dom["notationtype"]:
             case "dipl_GLT":
-                dipl_glt = getmnum(dom["dom"])
+                dipl_glt = getmnum(dom["dom"])[:2]
             case "dipl_CMN":
-                dipl_CMN = getmnum(dom["dom"])
+                dipl_CMN = getmnum(dom["dom"])[:2]
             case "ed_GLT":
                 ed_glt = getmnum(dom["dom"])
             case "ed_CMN":
@@ -153,40 +153,11 @@ def getmnum(root: etree.Element):
     )
 
 
-def create_list(root: str, files: list):
-    dipl_glt = ("fnf", 0)
-    dipl_CMN = ("fnf", 0)
-    ed_glt = ("fnf", 0)
-    ed_CMN = ("fnf", 0)
-    filename = ("error", 0)
-
-    for file in files:
-        filematch = re.match(
-            r".+(n\d+)_([0-9rv-]+)_enc_((ed|dipl)_(CMN|GLT))\.mei", file
-        )
-        if filematch is not None:
-            filename = filematch.group(1)
-            match filematch.group(3):
-                case "dipl_GLT":
-                    dipl_glt = getmnum(os.path.join(root, file))[0:2]
-                case "dipl_CMN":
-                    dipl_CMN = getmnum(os.path.join(root, file))[0:2]
-                case "ed_GLT":
-                    ed_glt = getmnum(os.path.join(root, file))
-                case "ed_CMN":
-                    ed_CMN = getmnum(os.path.join(root, file))
-
-    # return [filename,dipl_glt,dipl_CMN,ed_glt,ed_CMN] if not (dipl_glt[0]==dipl_CMN[0]==ed_glt[0]==ed_CMN[0] and dipl_glt[1]==dipl_CMN[1] and ed_glt[1]==ed_CMN[1] and ed_glt[2]==ed_CMN[2]=="0") else []
-    return (
-        [filename, ed_glt] if not (ed_glt[0] == ed_glt[1] and ed_glt[3] == "0") else []
-    )
-
-
-def add_header_from_GLT(
+def add_header_from_dipl_GLT(
     active_dom: dict, context_doms: list, projectstaff: str, role: str, **addargs
 ):
     """
-    Adds header from GLT
+    Adds header from dipl_GLT
 
     :param active_dom: dict containing {filename:str, notationtype:str, dom:etree.Element}
     :type active_dom: dict
@@ -196,64 +167,59 @@ def add_header_from_GLT(
     """
     # TODO needs to be adjusted
 
+    output_message = ""
+
     root = active_dom["dom"]
     for context_dom in context_doms:
-        if context_dom["notationtype"] == "ed_GLT":
+        if context_dom["notationtype"] == "dipl_GLT":
             helproot = context_dom["dom"]
             break
     else:
-        raise ValueError("add_header_from_GLT needs context_dom ed_GLT, not given")
+        raise RuntimeError("add_header_from_GLT needs context_dom dipl_GLT, not given")
 
     if root.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
         namespaces=ns,
     ):
-        raise Exception(f"{active_dom["filename"]} already has header")
+        raise RuntimeError(f"{active_dom["filename"]} already has E-Laute header")
 
     if not helproot.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
         namespaces=ns,
     ):
-        raise Exception(f"{active_dom["filename"]} has no header")
+        raise RuntimeError(f"{active_dom["filename"]} has no header")
 
     appInfo = root.find(".//mei:appInfo", namespaces=ns)
 
-    header = copy.deepcopy(helproot.find(".//mei:meiHead", namespaces=ns))
+    help_header = copy.deepcopy(helproot.find(".//mei:meiHead", namespaces=ns))
 
-    titlePart = header.find(".//mei:titlePart/mei:abbr", namespaces=ns)
-    titlePart.clear()
-    titlePart.set("expan", "Common Music Notation")
-    titlePart.text = "CMN"
+    abbr = help_header.find(".//mei:titlePart/mei:abbr", namespaces=ns)
+    if "ed" in active_dom["notationtype"]:
+        abbr.get_parent().text = "edition in "
+    if "CMN" in active_dom["notationtype"]:
+        abbr.clear()
+        abbr.set("expan", "Common Music Notation")
+        abbr.text = "CMN"
 
-    edition = header.find(".//mei:edition", namespaces=ns)
+    edition = help_header.find(".//mei:edition", namespaces=ns)
     edition.set("resp", f"#{projectstaff}")
     edition.text = f"First {'diplomatic transcription' if 'dipl' in active_dom["notationtype"] else 'edition'} in CMN. Lute tuned in A."
 
-    judenkunig = header.xpath(".//mei:persName[@xml:id='persons-78']", namespaces=ns)
-    if judenkunig:
-        judenkunig[0].set("role", role)
-
-    appinfoold = header.find(".//mei:appInfo", namespaces=ns)
+    appinfoold = help_header.find(".//mei:appInfo", namespaces=ns)
     encodingDesc = appinfoold.getparent()
     encodingDesc.remove(appinfoold)
     encodingDesc.insert(0, appInfo)
 
-    edps = header.xpath(".//mei:editorialDecl//p", namespaces=ns)
-
-    for edp in edps:
-        edp.text = ""
-
-    revisionDesc = header.find("./mei:revisionDesc", namespaces=ns)
+    revisionDesc = help_header.find("./mei:revisionDesc", namespaces=ns)
     del revisionDesc[1:]
     revisionDesc[0].attrib.update({"isodate": "YYYY-MM-DD", "n": "1", "resp": "#"})
-    revps = revisionDesc.xpath(".//mei:p", namespaces=ns)
+    revisionDesc_ps = revisionDesc.xpath(".//mei:p", namespaces=ns)
 
-    for revp in revps:
+    for revp in revisionDesc_ps:
         revp.text = ""
 
     root.remove(root.find("./mei:meiHead", namespaces=ns))
-    root.insert(0, header)
+    root.insert(0, help_header)
 
     active_dom["dom"] = root
-    output_message = ""
     return active_dom, output_message
