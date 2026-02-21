@@ -169,7 +169,7 @@ def add_header_from_dipl_GLT(
 
     output_message = ""
 
-    root = active_dom["dom"]
+    root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
         if context_dom["notationtype"] == "dipl_GLT":
             helproot = context_dom["dom"]
@@ -189,13 +189,15 @@ def add_header_from_dipl_GLT(
     ):
         raise RuntimeError(f"{active_dom["filename"]} has no header")
 
-    appInfo = root.find(".//mei:appInfo", namespaces=ns)
+    appInfo: etree.Element = root.find(".//mei:appInfo", namespaces=ns)
 
-    help_header = copy.deepcopy(helproot.find(".//mei:meiHead", namespaces=ns))
+    help_header: etree.Element = copy.deepcopy(
+        helproot.find(".//mei:meiHead", namespaces=ns)
+    )
 
     abbr = help_header.find(".//mei:titlePart/mei:abbr", namespaces=ns)
     if "ed" in active_dom["notationtype"]:
-        abbr.get_parent().text = "edition in "
+        abbr.getparent().text = "edition in "
     if "CMN" in active_dom["notationtype"]:
         abbr.clear()
         abbr.set("expan", "Common Music Notation")
