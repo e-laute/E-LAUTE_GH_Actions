@@ -157,7 +157,7 @@ def add_header_from_dipl_GLT(
     active_dom: dict, context_doms: list, projectstaff: str, role: str, **addargs
 ):
     """
-    Adds header from dipl_GLT
+    Adds header from dipl_GLT to ed_GLT, dipl_CMN or ed_CMN
 
     :param active_dom: dict containing {filename:str, notationtype:str, dom:etree.Element}
     :type active_dom: dict
