@@ -125,7 +125,7 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     else:
         id_name = active_dom["filename"]
     output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
-    explainer = f"""The table shows all filetypes found in the directory of {id_name} or fnf for (file not found)
+    explainer = f"""The table shows all notationtypes found in the directory of {id_name} or fnf for (file not found)
 The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
 """
     content = "\t".join(
@@ -282,7 +282,7 @@ def add_section_foldir_to_ed(
     """
     output_message = ""
 
-    if "ed" not in active_dom["filetype"]:
+    if "ed" not in active_dom["notationtype"]:
         raise RuntimeError(f"{active_dom['filename']} must be ed_GLT or ed_CMN")
 
     root = active_dom["dom"]
@@ -297,7 +297,7 @@ def add_section_foldir_to_ed(
             f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {get_pb_from}, not found"
         )
 
-    if "ed" in active_dom["filetype"]:
+    if "ed" in active_dom["notationtype"]:
         section_in_section = root.xpath(".//mei:section//mei:section", namespaces=ns)
 
         expansion = root.find(".//mei:expansion", namespaces=ns)
