@@ -3,7 +3,7 @@ name: Upload MEI files to TU-RDM
 on:
   workflow_call:
     secrets:
-      RDM_TEST_API_TOKEN_JJ:
+      RDM_API_TOKEN_JJ:
         required: true
 
 jobs:
@@ -43,8 +43,8 @@ jobs:
       # 5. Run release orchestration script
       - name: Run release orchestration
         env:
-          RDM_TEST_API_TOKEN_JJ: ${{ secrets.RDM_TEST_API_TOKEN_JJ }}
-          RELEASE_UPLOAD_MODE: testing
+          RDM_API_TOKEN_JJ: ${{ secrets.RDM_API_TOKEN_JJ }}
+          RELEASE_UPLOAD_MODE: production
         run: |
           python shared-actions/scripts/release_pipeline.py \
             --caller-repo-path "${{ github.workspace }}/caller-repo" \
