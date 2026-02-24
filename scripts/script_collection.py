@@ -379,8 +379,11 @@ def add_section_foldir_to_ed(
 
 
 def get_section_info_dipl(help_dom: dict):
-    pb_measures = help_dom["dom"].xpath("./mei:dir[@type='ref']/..", namespaces=ns)
+    pb_measures = help_dom["dom"].xpath(".//mei:dir[@type='ref']/..", namespaces=ns)
     print([p.tag for p in pb_measures])
+
+    if len(pb_measures) == 0:
+        raise RuntimeError(f"No foldir in {help_dom["filename"]}")
 
     section_info = []
 
