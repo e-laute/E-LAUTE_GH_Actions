@@ -146,6 +146,7 @@ def discover_eligible_ids(
 def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
     print("Validation...")
     failed_id_folders: list[str] = []
+    failure_logs: dict[str, str] = {}
 
     for folder_id in eligible_ids:
         id_folder = caller_repo_path.joinpath(folder_id)
@@ -157,14 +158,29 @@ def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
             ), contextlib.redirect_stderr(stderr_buffer):
                 folder_valid = validate_encodings.main(str(id_folder))
         except Exception as exc:
-            _ = exc
             folder_valid = False
+            stderr_buffer.write(f"Unhandled validator exception: {exc}\n")
 
         if not folder_valid:
             failed_id_folders.append(folder_id)
+            stdout_value = stdout_buffer.getvalue().strip()
+            stderr_value = stderr_buffer.getvalue().strip()
+            log_parts: list[str] = []
+            if stdout_value:
+                log_parts.append("stdout:\n" + stdout_value)
+            if stderr_value:
+                log_parts.append("stderr:\n" + stderr_value)
+            failure_logs[folder_id] = (
+                "\n\n".join(log_parts)
+                if log_parts
+                else "No validator output captured."
+            )
 
     if failed_id_folders:
         print("Validation failed for: " + ", ".join(sorted(failed_id_folders)))
+        for folder_id in sorted(failed_id_folders):
+            print(f"\n--- Validation log for {folder_id} ---")
+            print(failure_logs.get(folder_id, "No validator output captured."))
         return False
 
     print("Validation OK")

@@ -3,6 +3,7 @@
 import os
 import sys
 import io
+import argparse
 from lxml import etree
 import requests
 
@@ -30,11 +31,13 @@ def find_mei_files(directory):
     return mei_files
 
 
-def main(directory):
+def main(directory, verbose=False):
     schemas = dict()
     errors = []
     mei_files = find_mei_files(directory)
     if not mei_files:
+        if verbose:
+            print(f"No .mei/.tei files found in: {directory}")
         return True
 
     for mei_file in mei_files:
@@ -86,16 +89,49 @@ def main(directory):
             continue
 
     if errors:
+        if verbose:
+            print(
+                f"Validation failed in {directory} with {len(errors)} issue(s):",
+                file=sys.stderr,
+            )
+            for error in errors:
+                print(f"- {error}", file=sys.stderr)
         return False
-    else:
-        return True
+
+    if verbose:
+        print(f"Validation OK: {len(mei_files)} file(s) checked in {directory}")
+    return True
 
 
 if __name__ == "__main__":
-    directory = os.environ["CALLER_REPO_PATH"]
-    if not os.path.isdir(directory):
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate all .mei/.tei files in a directory recursively against "
+            "their declared RelaxNG schemas."
+        )
+    )
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        help=(
+            "Directory to validate. If omitted, uses the "
+            "CALLER_REPO_PATH environment variable."
+        ),
+    )
+    args = parser.parse_args()
+
+    directory = args.directory or os.environ.get("CALLER_REPO_PATH")
+    if not directory:
+        print(
+            "Error: provide a directory argument or set CALLER_REPO_PATH.",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    success = main(directory)
+
+    if not os.path.isdir(directory):
+        print(f"Error: not a valid directory: {directory}", file=sys.stderr)
+        sys.exit(1)
+    success = main(directory, verbose=True)
     if not success:
         sys.exit(1)
     sys.exit(0)

@@ -525,7 +525,11 @@ def create_description_for_work(row, file_count, resolved_title=None):
     """
     source_id = _as_text(row.get("source_id"))
     work_id = _as_text(row.get("work_id"))
-    title = _as_text(resolved_title) if resolved_title else _resolve_title_from_row(row)
+    title = (
+        _as_text(resolved_title)
+        if resolved_title
+        else _resolve_title_from_row(row)
+    )
     fol_or_p = _as_text(row.get("fol_or_p"))
     shelfmark = _as_text(row.get("shelfmark"))
     source_title = _as_text(look_up_source_title(sources_table, source_id))
@@ -549,7 +553,7 @@ def create_description_for_work(row, file_count, resolved_title=None):
     else:
         part2 = ""
 
-    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation) as well as a provenance file in Turtle format for each of the MEI files.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
+    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation) as well as a provenance file in Turtle format for each of the MEI files.</p><p>MEI ({make_html_link("https://music-encoding.org/")}) is an XML-based format for encoding and exchanging structured music notation and related editorial information. Turtle files (extension .ttl) are a plain-text RDF serialization that represents linked-data statements as triples (subject-predicate-object). Both MEI and Turtle files are text-based and can be opened with any standard text editor.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
 
     return part1 + part4 + part2 + part3
 
@@ -576,9 +580,7 @@ def fill_out_basic_metadata_for_work(
             "description": create_description_for_work(
                 row, file_count, resolved_title=title
             ),
-            "identifiers": [
-                {"identifier": work_id, "scheme": "other"}
-            ],
+            "identifiers": [{"identifier": work_id, "scheme": "other"}],
             "publication_date": datetime.today().strftime("%Y-%m-%d"),
             "dates": [
                 {
@@ -609,6 +611,16 @@ def fill_out_basic_metadata_for_work(
                         "en": "Creative Commons Attribution Share Alike 4.0 International"
                     },
                 }
+            ],
+            "subjects": [
+                {
+                    "id": "http://www.oecd.org/science/inno/38235147.pdf?6.4",
+                    "scheme": "FOS",
+                    "subject": "Arts (arts, history of arts, performing arts, music)",
+                },
+                {"subject": "lute music"},
+                {"subject": "MEI"},
+                {"subject": "TTL"},
             ],
         },
     }
@@ -1040,7 +1052,9 @@ def main() -> int:
         SELECTED_UPLOAD_FILES = None
         _get_cached_candidate_upload_files()
 
-        new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
+        new_work_ids, existing_work_ids = (
+            process_elaute_ids_for_update_or_create()
+        )
         has_failures = False
 
         if len(new_work_ids) > 0:
