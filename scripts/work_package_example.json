@@ -24,7 +24,52 @@
         "default": "dipl_GLT"
       }
     },
-    "scripts": ["script_collection.add_section_foldir_to_ed"],
+    "scripts": ["script_collection.add_section_foldir_from_context_to_ed"],
+    "commitResult": true
+  },
+  {
+    "id": "prepare_ed_GLT_from_fronimo",
+    "label": "Prepare ed_GLT from Fronimo",
+    "description": "Add Header, Facs, Section, Finis, sbs. getElemfrom will be source for header, facs, sections, if no finis should be added, leave empty",
+    "userFacing": true,
+    "params": {
+      "getElemFrom": {
+        "type": "String",
+        "default": "dipl_GLT"
+      },
+      "sbInterval": {
+        "type": "Number",
+        "default": 5
+      },
+      "projectstaff": {
+        "type": "String"
+      },
+      "finisText": {
+        "type": "String",
+        "default": ""
+      }
+    },
+    "scripts": [
+      "script_collection.add_header_from_context",
+      "script_collection.add_facs_from_context",
+      "script_collection.add_section_foldir_from_context_to_ed",
+      "script_collection.add_finis_to_last_measure",
+      "script_collection.add_sbs_every_n"
+    ],
+    "commitResult": true
+  },
+  {
+    "id": "add_finis",
+    "label": "Add finis with finis text to last measure",
+    "description": "creates finistext in dir at last tstamp of last measure",
+    "userFacing": true,
+    "params": {
+      "finisText": {
+        "type": "String",
+        "default": ""
+      }
+    },
+    "scripts": ["script_collection.add_finis_to_last_measure"],
     "commitResult": true
   },
   {
@@ -38,7 +83,7 @@
         "default": "dipl_GLT"
       }
     },
-    "scripts": ["script_collection.add_facs"],
+    "scripts": ["script_collection.add_facs_from_context"],
     "commitResult": true
   },
   {
@@ -77,7 +122,7 @@
     "commitResult": true
   },
   {
-    "id": "add_header_from_GLT",
+    "id": "add_header_from_context",
     "label": "Add Header from getElemFrom",
     "description": "Adds header from dipl GLT with needed adjustments for all other filetypes",
     "userFacing": true,

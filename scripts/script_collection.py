@@ -68,7 +68,9 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
     return active_dom, output_message
 
 
-def add_facs(active_dom: dict, context_doms: list, getElemFrom: str, **addargs):
+def add_facs_from_context(
+    active_dom: dict, context_doms: list, getElemFrom: str, **addargs
+):
     """
     addsbfacs from getPbFroms
 
@@ -76,6 +78,8 @@ def add_facs(active_dom: dict, context_doms: list, getElemFrom: str, **addargs):
     :type active_dom: dict
     :param context_doms: list containing dom dicts
     :type context_doms: list
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :param addargs: Addional arguments that are unused
     """
     output_message = ""
@@ -210,6 +214,8 @@ def add_header_from_context(
     :param active_dom: dict containing {filename:str, notationtype:str, dom:etree.Element}
     :type active_dom: dict
     :param context_doms: list containing dom dicts
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :type context_doms: list
     :param addargs: Addional arguments that are unused
     """
@@ -294,6 +300,9 @@ def get_last_mnum(root: etree.Element):
 
 
 def add_foldir(measure: etree.Element, fol: str, tstamp: str):
+    """
+    Adds subelement dir to measure
+    """
     dir = etree.SubElement(
         measure,
         "dir",
@@ -304,6 +313,12 @@ def add_foldir(measure: etree.Element, fol: str, tstamp: str):
 
 
 def manual_unwrap(element):
+    """
+    Removes Element, adding children to parent
+
+    :param element: etree.Element to be processed
+    :type element: etree.Element
+    """
     parent = element.getparent()
     if parent is None:
         return  # Cannot unwrap the root
@@ -326,7 +341,7 @@ def manual_unwrap(element):
     parent.remove(element)
 
 
-def add_section_foldir_to_ed(
+def add_section_foldir_from_context_to_ed(
     active_dom: dict, context_doms: list, getElemFrom: str, **addargs
 ):
     """
@@ -336,6 +351,8 @@ def add_section_foldir_to_ed(
     :type active_dom: dict
     :param context_doms: list containing dom dicts
     :type context_doms: list
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :param addargs: Addional arguments that are unused
     """
     output_message = ""
@@ -343,7 +360,6 @@ def add_section_foldir_to_ed(
     if "ed" not in active_dom["notationtype"]:
         raise RuntimeError(f"{active_dom['filename']} must be ed_GLT or ed_CMN")
 
-    root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
         if context_dom["notationtype"] == getElemFrom:
@@ -407,14 +423,15 @@ def add_section_foldir_to_ed(
 
     section_children = list(section)
     current_n = ""
-    current_section = 0
+    current_section = -1  # current section statrs before 0 to account for first section
     print(section_info)
     for child in section_children:
         if child.tag == f"{{{ns['mei']}}}measure":
             current_n = child.get("n", "")
             if (
                 current_section != len(section_info) - 1
-                and current_n == section_info[current_section + 1][0]
+                and current_n
+                == section_info[current_section + 1][0]  # compare to next section mnum
             ):
                 current_section += 1
                 section_info[current_section][3].append(child)
@@ -424,7 +441,7 @@ def add_section_foldir_to_ed(
                     section_info[current_section][2],
                 )
             else:
-                section_info[current_section][3].append(child)
+                section_info[current_section][3].append(child)  # sh
         else:
             section_info[current_section][3].append(child)
 
@@ -442,6 +459,9 @@ def add_section_foldir_to_ed(
 
 
 def get_section_info_dipl(help_dom: dict):
+    """
+    Searches for dirs with folio to find mnum of measures after or containing page beginning
+    """
     pb_measures = help_dom["dom"].xpath(".//mei:dir[@type='ref']/..", namespaces=ns)
     print([p.tag for p in pb_measures])
 
@@ -455,7 +475,9 @@ def get_section_info_dipl(help_dom: dict):
             raise RuntimeError(
                 f"foldir parent wasn't measure in {help_dom["filename"]} at {pb_measure.get("n","no_n_found")}"
             )
-        if pb_measure.xpath("ancestor::mei:orig", namespaces=ns):
+        if pb_measure.xpath(
+            "ancestor::mei:orig", namespaces=ns
+        ):  # only look in choice/reg
             continue
         if pb_measure.xpath("ancestor::mei:reg", namespaces=ns):
             pbs = pb_measure.getparent().xpath("./mei:pb", namespaces=ns)
@@ -477,6 +499,7 @@ def get_section_info_dipl(help_dom: dict):
 
 
 def get_section_info_ed(help_dom: dict):
+    """Searches for sections and dirs with folio denoting page peginning"""
     help_sections = help_dom["dom"].xpath("//mei:section[@n]", namespaces=ns)
 
     section_info = []
@@ -492,7 +515,110 @@ def get_section_info_ed(help_dom: dict):
 
 
 def get_previous_at_same_depth(tree, element):
+    """Finds previous sibling independnet of nesting"""
     depth = get_depth(element)
     same_depth = [el for el in tree.iter() if get_depth(el) == depth]
     idx = same_depth.index(element)
     return same_depth[idx - 1] if idx > 0 else None
+
+
+def guess_string_width(text):
+    """width of ascii letters as arbitary heuristic"""
+    if not text:
+        return 0
+
+    # Split by lines and find the longest one (visual width-wise)
+    lines = text.splitlines()
+
+    # Character weight map based on a typical sans-serif font
+    # Normalized so that a standard lowercase letter or space is ~1.0
+    weights = {
+        "wide": "MWm@W",  # Weight: 1.5
+        "narrow": "ilj|!:.tI[]",  # Weight: 0.4
+        "caps": "ABCDEFGHJKLNPQRSTUVXYZ",  # Weight: 1.2
+    }
+
+    def get_line_width(line):
+        """nested function to compute line width with heuristic"""
+        width = 0.0
+        for char in line:
+            if char in weights["wide"]:
+                width += 1.5
+            elif char in weights["narrow"]:
+                width += 0.4
+            elif char.isupper():
+                width += 1.2
+            elif char == "\t":
+                width += 4.0  # Standard 4-space tab
+            else:
+                width += 1.0  # Default for lowercase, numbers, and spaces
+        return width
+
+    return max(get_line_width(line) for line in lines)
+
+
+def add_finis_to_last_measure(
+    active_dom: dict, context_doms: list, finisText: str, **addargs
+):
+    """
+    adds finis on the last tstamp+1 of the last measure, doesnt account for mark-up or n-tuplets
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param finisText: finis text
+    :type finisText: str
+    :param addargs: Addional arguments that are unused
+    """
+    output_message = ""
+
+    if finisText == "":
+        output_message = "No finis added because none given"
+        return active_dom, output_message
+
+    root = active_dom["dom"]
+
+    meterSig = root.find(".//mei:meterSig", namespaces=ns)
+
+    # remove before adding again
+    finis = root.xpath("//mei:dir[@type='finis']", namespaces=ns)
+    if finis:
+        raise RuntimeError("Finis already there")
+
+    measure = root.xpath("//mei:measure", namespaces=ns)[-1]
+    layer = measure.find(".//mei:layer", namespaces=ns)
+    tstamp = dur_length(layer)
+    print(tstamp)
+    if meterSig is not None:
+        tstamp = tstamp * int(meterSig.get("unit", "4"))
+    else:
+        tstamp *= 4
+        for _ in range(10):
+            if tstamp.is_integer():
+                break
+            tstamp *= 2
+        else:
+            raise RuntimeError(
+                f"Measure {measure.get("n","n_not_found")} has problematic tstamp calculation"
+            )
+
+    print(tstamp)
+    vu = str(
+        round(guess_string_width(finisText) * 2.5) + 5
+    )  # vu to whitespace ca. 2.5 for wordlength + 5 as spacing
+    dir = etree.SubElement(
+        measure,
+        "dir",
+        {
+            "staff": "2" if "ed_CMN" in active_dom["notationtype"] else "1",
+            "tstamp": str(tstamp + 1),
+            "place": "above" if "ed_CMN" in active_dom["notationtype"] else "within",
+            "type": "finis",
+            "ho": vu + "vu",
+        },
+    )
+    rend = etree.SubElement(dir, "rend", {"halign": "right"})
+    rend.text = finisText
+
+    active_dom["dom"] = root
+    return active_dom, output_message
