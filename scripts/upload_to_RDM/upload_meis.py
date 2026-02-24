@@ -36,6 +36,7 @@ from upload_to_RDM.rdm_upload_utils import (
     get_candidate_upload_files,
     get_candidate_mei_files_from_uploads,
     get_work_ids_from_files,
+    get_short_work_id_for_lookup,
     get_files_for_work_id,
     get_upload_files_for_work_id,
     prepare_upload_file_paths,
@@ -63,6 +64,43 @@ sources_table_path = os.environ.get(
     str(Path(__file__).resolve().parent / "tables" / "sources_table.csv"),
 )
 sources_table = load_sources_table_csv(sources_table_path)
+
+id_table_path = os.environ.get(
+    "ELAUTE_ID_TABLE_PATH",
+    str(Path(__file__).resolve().parent / "tables" / "id_table.csv"),
+)
+
+
+def _load_id_table_title_map(id_csv_path):
+    csv_path = Path(id_csv_path)
+    if not csv_path.exists():
+        return {}
+
+    raw_df = pd.read_csv(csv_path, dtype="string")
+    work_col = "work_id" if "work_id" in raw_df.columns else "IDs"
+    title_col = "title" if "title" in raw_df.columns else "Title"
+    if work_col not in raw_df.columns or title_col not in raw_df.columns:
+        return {}
+
+    table = raw_df[[work_col, title_col]].copy()
+    table[work_col] = table[work_col].astype("string").str.strip()
+    table[title_col] = table[title_col].astype("string").str.strip()
+    table = table.dropna(subset=[work_col, title_col])
+    table = table[table[title_col] != ""]
+
+    title_map = {}
+    for _, row in table.iterrows():
+        work_id = str(row[work_col]).strip()
+        title = str(row[title_col]).strip()
+        if not work_id or not title:
+            continue
+        short_work_id = get_short_work_id_for_lookup(work_id)
+        if short_work_id and short_work_id not in title_map:
+            title_map[short_work_id] = title
+    return title_map
+
+
+ID_TABLE_TITLE_BY_WORK_ID = _load_id_table_title_map(id_table_path)
 
 
 def _emit_work_status(work_id, success, mode, detail=None):
@@ -102,6 +140,44 @@ def _emit_exception_debug(work_id, mode, exc, context=None):
     print(f"{work_id}: DEBUG {mode} traceback:\n{traceback.format_exc()}")
 
 
+def _resolve_title_from_row(row):
+    """
+    Resolve a robust, non-empty title from available metadata fields.
+    Preserves square brackets and all original characters.
+    """
+    work_id = _as_text(row.get("work_id")).strip()
+    short_work_id = get_short_work_id_for_lookup(work_id) if work_id else ""
+    id_table_title = (
+        _as_text(ID_TABLE_TITLE_BY_WORK_ID.get(short_work_id)).strip()
+        if short_work_id
+        else ""
+    )
+
+    candidates = [
+        id_table_title,
+        _as_text(row.get("title")).strip(),
+        _as_text(row.get("original_title")).strip(),
+        _as_text(row.get("normalized_title")).strip(),
+        _as_text(row.get("book_title")).strip(),
+    ]
+
+    source_id = _as_text(row.get("source_id")).strip()
+    source_title = (
+        _as_text(look_up_source_title(sources_table, source_id)).strip()
+        if source_id
+        else ""
+    )
+    candidates.append(source_title)
+
+    if work_id:
+        candidates.append(work_id)
+
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return ""
+
+
 def get_metadata_df_from_mei(mei_file_path):
     try:
         with open(mei_file_path, "rb") as f:
@@ -110,11 +186,12 @@ def get_metadata_df_from_mei(mei_file_path):
         doc = etree.fromstring(content)
 
         def safe_element_text(element):
-            return (
-                element.text.strip()
-                if element is not None and element.text is not None
-                else ""
-            )
+            if element is None:
+                return ""
+            # Collect nested text too (e.g. <title><supplied>...</supplied></title>)
+            # so editorial markup does not hide title content.
+            text = "".join(element.itertext())
+            return text.strip() if text else ""
 
         # Define namespace for MEI
         ns = {"mei": "http://www.music-encoding.org/ns/mei"}
@@ -202,6 +279,16 @@ def get_metadata_df_from_mei(mei_file_path):
         book_title_text = safe_element_text(book_title)
         if book_title_text:
             metadata["book_title"] = book_title_text
+
+        # Final title fallback chain for robustness.
+        if not metadata.get("title"):
+            metadata["title"] = (
+                metadata.get("original_title")
+                or metadata.get("normalized_title")
+                or metadata.get("book_title")
+                or metadata.get("work_id")
+                or ""
+            )
 
         # Extract license information
         license_elem = doc.find(".//mei:useRestrict/mei:ref", ns)
@@ -432,13 +519,13 @@ def combine_metadata_for_work_id(work_id, file_paths):
     return pd.DataFrame([combined_metadata]), all_people, all_corporate
 
 
-def create_description_for_work(row, file_count):
+def create_description_for_work(row, file_count, resolved_title=None):
     """
     Create description for a work with multiple files.
     """
     source_id = _as_text(row.get("source_id"))
     work_id = _as_text(row.get("work_id"))
-    title = _as_text(row.get("title"))
+    title = _as_text(resolved_title) if resolved_title else _resolve_title_from_row(row)
     fol_or_p = _as_text(row.get("fol_or_p"))
     shelfmark = _as_text(row.get("shelfmark"))
     source_title = _as_text(look_up_source_title(sources_table, source_id))
@@ -475,7 +562,7 @@ def fill_out_basic_metadata_for_work(
     """
     row = metadata_row.iloc[0]
     work_id = _as_text(row.get("work_id"))
-    title = _as_text(row.get("title"))
+    title = _resolve_title_from_row(row)
     publication_date = _as_text(
         row.get("publication_date"), datetime.today().strftime("%Y-%m-%d")
     )
@@ -486,7 +573,9 @@ def fill_out_basic_metadata_for_work(
             "title": f"{title} ({work_id}) MEI Transcriptions",
             "creators": [],
             "contributors": [],
-            "description": create_description_for_work(row, file_count),
+            "description": create_description_for_work(
+                row, file_count, resolved_title=title
+            ),
             "identifiers": [
                 {"identifier": work_id, "scheme": "other"}
             ],
