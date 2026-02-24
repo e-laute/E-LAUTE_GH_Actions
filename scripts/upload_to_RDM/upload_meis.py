@@ -19,6 +19,7 @@ import pandas as pd
 import os
 import shutil
 import sys
+import traceback
 from lxml import etree
 
 from datetime import datetime
@@ -80,6 +81,27 @@ def _format_exception_detail(exc):
     return exc_type
 
 
+def _as_text(value, default=""):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    return str(value)
+
+
+def _emit_exception_debug(work_id, mode, exc, context=None):
+    print(
+        f"{work_id}: DEBUG {mode} exception detail: "
+        f"{_format_exception_detail(exc)}"
+    )
+    if context:
+        print(f"{work_id}: DEBUG {mode} context: {context}")
+    print(f"{work_id}: DEBUG {mode} traceback:\n{traceback.format_exc()}")
+
+
 def get_metadata_df_from_mei(mei_file_path):
     try:
         with open(mei_file_path, "rb") as f:
@@ -97,8 +119,17 @@ def get_metadata_df_from_mei(mei_file_path):
         # Define namespace for MEI
         ns = {"mei": "http://www.music-encoding.org/ns/mei"}
 
-        # Extract basic metadata
-        metadata = {}
+        # Extract basic metadata. Initialize required keys so lookups
+        # never fail later, and preserve arbitrary string content
+        # (including square brackets) unchanged.
+        metadata = {
+            "work_id": "",
+            "title": "",
+            "source_id": "",
+            "fol_or_p": "",
+            "shelfmark": "",
+            "publication_date": "",
+        }
 
         # Extract work ID from identifier - try multiple locations
         identifier_elem = doc.find(".//mei:identifier", ns)
@@ -121,7 +152,7 @@ def get_metadata_df_from_mei(mei_file_path):
             metadata["title"] = main_title_text
 
         # Try work title if main title not found
-        if "title" not in metadata:
+        if not metadata.get("title"):
             work_title = doc.find(".//mei:work/mei:title", ns)
             work_title_text = safe_element_text(work_title)
             if work_title_text:
@@ -143,7 +174,7 @@ def get_metadata_df_from_mei(mei_file_path):
             metadata["publication_date"] = pub_date.get("isodate")
 
         # Extract folio/page information if not already extracted
-        if "fol_or_p" not in metadata:
+        if not metadata.get("fol_or_p"):
             biblscope = doc.find(".//mei:biblScope", ns)
             biblscope_text = safe_element_text(biblscope)
             if biblscope_text:
@@ -159,7 +190,7 @@ def get_metadata_df_from_mei(mei_file_path):
                 metadata["source_id"] = work_id_text.rsplit("_", 1)[0]
 
         # Validate source ID after all extraction attempts
-        if "source_id" not in metadata:
+        if not metadata.get("source_id"):
             errors.append(f"No source ID found in MEI file {mei_file_path}")
 
         shelfmark = doc.find(".//mei:monogr/mei:identifier", ns)
@@ -405,18 +436,24 @@ def create_description_for_work(row, file_count):
     """
     Create description for a work with multiple files.
     """
-    links = look_up_source_links(sources_table, row["source_id"])
+    source_id = _as_text(row.get("source_id"))
+    work_id = _as_text(row.get("work_id"))
+    title = _as_text(row.get("title"))
+    fol_or_p = _as_text(row.get("fol_or_p"))
+    shelfmark = _as_text(row.get("shelfmark"))
+    source_title = _as_text(look_up_source_title(sources_table, source_id))
+
+    links = look_up_source_links(sources_table, source_id)
     links_stringified = (
         ", ".join(make_html_link(link) for link in links) if links else ""
     )
 
-    source_id = row["source_id"]
-    work_number = row["work_id"].split("_")[-1]
+    work_number = work_id.split("_")[-1] if work_id else ""
     platform_link = make_html_link(
         f"https://edition.onb.ac.at/fedora/objects/o:lau.{source_id}/methods/sdef:TEI/get?mode={work_number}"
     )
 
-    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th-century lute piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
+    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{title}\", a 16th-century lute piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{title}\" and the id \"{work_id}\" in the e-lautedb. It is found on the page(s) or folio(s) {fol_or_p} in the source \"{source_title}\" with the E-LAUTE source-id \"{source_id}\" and the shelfmark {shelfmark}.</p>"
 
     part4 = f"<p>Images of the original source and renderings of the transcriptions can be found on the E-LAUTE platform: {platform_link}.</p>"
 
@@ -437,24 +474,26 @@ def fill_out_basic_metadata_for_work(
     Fill out metadata for RDM upload for a work with multiple files.
     """
     row = metadata_row.iloc[0]
+    work_id = _as_text(row.get("work_id"))
+    title = _as_text(row.get("title"))
+    publication_date = _as_text(
+        row.get("publication_date"), datetime.today().strftime("%Y-%m-%d")
+    )
 
     metadata = {
         "files": {"enabled": True},
         "metadata": {
-            "title": f'{row["title"]} ({row["work_id"]}) MEI Transcriptions',
+            "title": f"{title} ({work_id}) MEI Transcriptions",
             "creators": [],
             "contributors": [],
             "description": create_description_for_work(row, file_count),
             "identifiers": [
-                {"identifier": f"{row['work_id']}", "scheme": "other"}
+                {"identifier": work_id, "scheme": "other"}
             ],
             "publication_date": datetime.today().strftime("%Y-%m-%d"),
             "dates": [
                 {
-                    "date": row.get(
-                        "publication_date",
-                        datetime.today().strftime("%Y-%m-%d"),
-                    ),
+                    "date": publication_date,
                     "description": "Creation date",
                     "type": {"id": "created", "title": {"en": "Created"}},
                 }
@@ -583,7 +622,9 @@ def fill_out_basic_metadata_for_work(
                 contributor_names.add(person_role_key)
 
     # Add source links as related identifiers
-    links_to_source = look_up_source_links(sources_table, row["source_id"])
+    links_to_source = look_up_source_links(
+        sources_table, _as_text(row.get("source_id"))
+    )
     if links_to_source:
         metadata["metadata"]["related_identifiers"].extend(
             create_related_identifiers(links_to_source)
@@ -649,9 +690,28 @@ def update_records_in_RDM(work_ids_to_update):
                 continue
 
             # Create new metadata structure
-            new_metadata_structure = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(mei_file_paths)
-            )
+            try:
+                new_metadata_structure = fill_out_basic_metadata_for_work(
+                    metadata_df, people_df, corporate_df, len(mei_file_paths)
+                )
+            except KeyError as exc:
+                append_unique(failed_updates, work_id)
+                _emit_work_status(
+                    work_id,
+                    False,
+                    "UPDATE",
+                    f"metadata-key-missing: {_format_exception_detail(exc)}",
+                )
+                _emit_exception_debug(
+                    work_id,
+                    "UPDATE",
+                    exc,
+                    context={
+                        "metadata_columns": list(metadata_df.columns),
+                        "mei_files": mei_file_paths,
+                    },
+                )
+                continue
             new_metadata = new_metadata_structure["metadata"]
 
             # Fetch current record metadata from RDM
@@ -730,6 +790,12 @@ def update_records_in_RDM(work_ids_to_update):
                 "UPDATE",
                 f"unexpected-error: {_format_exception_detail(exc)}",
             )
+            _emit_exception_debug(
+                work_id,
+                "UPDATE",
+                exc,
+                context={"record_id": record_id},
+            )
             continue
 
     return updated_records, list(dict.fromkeys(failed_updates))
@@ -801,9 +867,28 @@ def upload_mei_files(work_ids):
                 continue
 
             # Create RDM metadata
-            metadata = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(mei_file_paths)
-            )
+            try:
+                metadata = fill_out_basic_metadata_for_work(
+                    metadata_df, people_df, corporate_df, len(mei_file_paths)
+                )
+            except KeyError as exc:
+                append_unique(failed_uploads, work_id)
+                _emit_work_status(
+                    work_id,
+                    False,
+                    "NEW",
+                    f"metadata-key-missing: {_format_exception_detail(exc)}",
+                )
+                _emit_exception_debug(
+                    work_id,
+                    "NEW",
+                    exc,
+                    context={
+                        "metadata_columns": list(metadata_df.columns),
+                        "mei_files": mei_file_paths,
+                    },
+                )
+                continue
 
             # ---- UPLOAD ---
 
@@ -835,6 +920,12 @@ def upload_mei_files(work_ids):
                 False,
                 "NEW",
                 f"unexpected-error: {_format_exception_detail(exc)}",
+            )
+            _emit_exception_debug(
+                work_id,
+                "NEW",
+                exc,
+                context={"upload_files": upload_file_paths},
             )
     return list(dict.fromkeys(failed_uploads))
 
