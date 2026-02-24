@@ -16,6 +16,7 @@ If --ttl is omitted, Turtle is written to stdout.
 import sys
 import argparse
 import re
+from urllib.parse import quote
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -79,9 +80,9 @@ def _strip_ns(tag: str) -> str:
 def _clean_uri(text: str) -> str:
     if not text:
         return ""
-    cleaned = re.sub(r"[^\w\s-]", "", text)
-    cleaned = re.sub(r"\s+", "_", cleaned.strip())
-    return cleaned.lower()
+    cleaned = re.sub(r"\s+", "_", text.strip().lower())
+    # Preserve characters like square brackets by percent-encoding them.
+    return quote(cleaned, safe="._~-")
 
 
 def _extract_text(elem: ET.Element) -> str:
