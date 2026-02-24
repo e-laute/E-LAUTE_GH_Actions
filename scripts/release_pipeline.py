@@ -233,9 +233,7 @@ def run_provenance_on_converted_mei_files(
             if work_id in excluded_ids:
                 continue
             try:
-                _output_path = generate_provenance.build_provenance_for_mei_file(
-                    mei_path
-                )
+                generate_provenance.build_provenance_for_mei_file(mei_path)
             except Exception as exc:  # noqa: BLE001
                 _ = exc
                 failed_files.append(str(mei_path))
@@ -355,8 +353,10 @@ def run_upload_on_id_folders(
         record_lines = [
             line.strip()
             for line in (result.stdout or "").splitlines()
-            if line.strip().endswith(": SUCCESS")
-            or ": FAILED (" in line.strip()
+            if ": SUCCESS NEW" in line.strip()
+            or ": SUCCESS UPDATE" in line.strip()
+            or ": FAILED NEW" in line.strip()
+            or ": FAILED UPDATE" in line.strip()
         ]
         for line in record_lines:
             print(f"{folder_id} -> {line}")

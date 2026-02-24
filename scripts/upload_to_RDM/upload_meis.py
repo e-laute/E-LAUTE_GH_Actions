@@ -64,6 +64,14 @@ sources_table_path = os.environ.get(
 sources_table = load_sources_table_csv(sources_table_path)
 
 
+def _emit_work_status(work_id, success, mode, detail=None):
+    status = "SUCCESS" if success else "FAILED"
+    message = f"{work_id}: {status} {mode}"
+    if detail:
+        message = f"{message} ({detail})"
+    print(message)
+
+
 def get_metadata_df_from_mei(mei_file_path):
     try:
         with open(mei_file_path, "rb") as f:
@@ -597,6 +605,7 @@ def update_records_in_RDM(work_ids_to_update):
         # Check if work_id exists in mapping
         mapping_row = existing_records[existing_records["elaute_id"] == work_id]
         if mapping_row.empty:
+            _emit_work_status(work_id, False, "UPDATE", "missing-record-map")
             continue
 
         record_id = mapping_row.iloc[0]["record_id"]
@@ -608,12 +617,16 @@ def update_records_in_RDM(work_ids_to_update):
             )
             if not mei_file_paths:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(work_id, False, "UPDATE", "missing-mei-files")
                 continue
             upload_file_paths = get_upload_files_for_work_id(
                 work_id, _get_cached_candidate_upload_files()
             )
             if not upload_file_paths:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(
+                    work_id, False, "UPDATE", "missing-upload-files"
+                )
                 continue
 
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
@@ -622,6 +635,9 @@ def update_records_in_RDM(work_ids_to_update):
 
             if metadata_df.empty:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(
+                    work_id, False, "UPDATE", "metadata-extraction"
+                )
                 continue
 
             # Create new metadata structure
@@ -636,6 +652,7 @@ def update_records_in_RDM(work_ids_to_update):
             )
             if r.status_code != 200:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(work_id, False, "UPDATE", "fetch-record")
                 continue
 
             current_record = r.json()
@@ -667,6 +684,7 @@ def update_records_in_RDM(work_ids_to_update):
                     metadata_changed = True
 
             if not metadata_changed:
+                _emit_work_status(work_id, True, "UPDATE", "no-changes")
                 continue
 
             # --- UPLOAD ---
@@ -689,12 +707,16 @@ def update_records_in_RDM(work_ids_to_update):
                 failed_updates.extend(fails)
                 if not fails:
                     append_unique(updated_records, work_id)
+                    _emit_work_status(work_id, True, "UPDATE")
+                else:
+                    _emit_work_status(work_id, False, "UPDATE")
             finally:
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
         except Exception:
             append_unique(failed_updates, work_id)
+            _emit_work_status(work_id, False, "UPDATE", "unexpected-error")
             continue
 
     return updated_records, list(dict.fromkeys(failed_updates))
@@ -751,6 +773,7 @@ def upload_mei_files(work_ids):
 
         if not mei_file_paths or not upload_file_paths:
             append_unique(failed_uploads, work_id)
+            _emit_work_status(work_id, False, "NEW", "missing-input-files")
             continue
 
         try:
@@ -761,6 +784,7 @@ def upload_mei_files(work_ids):
 
             if metadata_df.empty:
                 append_unique(failed_uploads, work_id)
+                _emit_work_status(work_id, False, "NEW", "metadata-extraction")
                 continue
 
             # Create RDM metadata
@@ -783,12 +807,17 @@ def upload_mei_files(work_ids):
                     ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
                 )
                 failed_uploads.extend(fails)
+                if fails:
+                    _emit_work_status(work_id, False, "NEW")
+                else:
+                    _emit_work_status(work_id, True, "NEW")
             finally:
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
         except Exception:
             append_unique(failed_uploads, work_id)
+            _emit_work_status(work_id, False, "NEW", "unexpected-error")
     return list(dict.fromkeys(failed_uploads))
 
 
