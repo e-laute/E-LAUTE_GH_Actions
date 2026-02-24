@@ -276,12 +276,10 @@ def get_metadata_df_from_tei(tei_file_path):
 
 def create_description(row):
     links = look_up_source_links(sources_table, row["source_id"])
-    valid_links = [
-        link
-        for link in links
-        if link is not None and link == link and str(link).strip() != ""
-    ]
-    links_stringified = ", ".join(make_html_link(link) for link in valid_links)
+
+    links_stringified = (
+        ", ".join(make_html_link(link) for link in links) if links else ""
+    )
 
     source_id = row["source_id"]
     platform_link = make_html_link(
@@ -301,6 +299,8 @@ def create_description(row):
 
     if links_stringified not in [None, ""]:
         part2 = f"<p>Links to the source in other libraries: {links_stringified}.</p>"
+    else:
+        part2 = ""
 
     part3 = f'<h2>Dataset Contents</h2><p>This dataset consists of one tei-file that contains the transcription of the original source.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link("https://e-laute.info/")}</p>'
 
