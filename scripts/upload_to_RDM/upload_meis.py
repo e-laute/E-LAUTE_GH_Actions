@@ -69,6 +69,13 @@ def get_metadata_df_from_mei(mei_file_path):
 
         doc = etree.fromstring(content)
 
+        def safe_element_text(element):
+            return (
+                element.text.strip()
+                if element is not None and element.text is not None
+                else ""
+            )
+
         # Define namespace for MEI
         ns = {"mei": "http://www.music-encoding.org/ns/mei"}
 
@@ -80,8 +87,9 @@ def get_metadata_df_from_mei(mei_file_path):
         if identifier_elem is None:
             # Try alternative locations
             identifier_elem = doc.find(".//mei:work/mei:identifier", ns)
-        if identifier_elem is not None:
-            metadata["work_id"] = identifier_elem.text.strip()
+        identifier_text = safe_element_text(identifier_elem)
+        if identifier_text:
+            metadata["work_id"] = identifier_text
         else:
             errors.append(f"No work ID found in MEI file {mei_file_path}")
 
@@ -90,22 +98,26 @@ def get_metadata_df_from_mei(mei_file_path):
         if main_title is None:
             # Try simple title element
             main_title = doc.find(".//mei:title", ns)
-        if main_title is not None:
-            metadata["title"] = main_title.text.strip()
+        main_title_text = safe_element_text(main_title)
+        if main_title_text:
+            metadata["title"] = main_title_text
 
         # Try work title if main title not found
         if "title" not in metadata:
             work_title = doc.find(".//mei:work/mei:title", ns)
-            if work_title is not None:
-                metadata["title"] = work_title.text.strip()
+            work_title_text = safe_element_text(work_title)
+            if work_title_text:
+                metadata["title"] = work_title_text
 
         original_title = doc.find('.//mei:title[@type="original"]', ns)
-        if original_title is not None:
-            metadata["original_title"] = original_title.text.strip()
+        original_title_text = safe_element_text(original_title)
+        if original_title_text:
+            metadata["original_title"] = original_title_text
 
         normalized_title = doc.find('.//mei:title[@type="normalized"]', ns)
-        if normalized_title is not None:
-            metadata["normalized_title"] = normalized_title.text.strip()
+        normalized_title_text = safe_element_text(normalized_title)
+        if normalized_title_text:
+            metadata["normalized_title"] = normalized_title_text
 
         # Extract publication date
         pub_date = doc.find(".//mei:pubStmt/mei:date[@isodate]", ns)
@@ -115,29 +127,32 @@ def get_metadata_df_from_mei(mei_file_path):
         # Extract folio/page information if not already extracted
         if "fol_or_p" not in metadata:
             biblscope = doc.find(".//mei:biblScope", ns)
-            if biblscope is not None:
-                metadata["fol_or_p"] = biblscope.text.strip()
-
-        # Extract source ID
-        if "source_id" not in metadata:
-            errors.append(f"No source ID found in MEI file {mei_file_path}")
+            biblscope_text = safe_element_text(biblscope)
+            if biblscope_text:
+                metadata["fol_or_p"] = biblscope_text
 
         # Extract work ID from monograph identifier
         work_id = doc.find(".//mei:analytic/mei:identifier", ns)
-        if work_id is not None:
-            metadata["work_id"] = work_id.text.strip()
+        work_id_text = safe_element_text(work_id)
+        if work_id_text:
+            metadata["work_id"] = work_id_text
             # Extract source_id from work_id by removing everything after the last underscore
-            work_id_text = work_id.text.strip()
             if "_" in work_id_text:
                 metadata["source_id"] = work_id_text.rsplit("_", 1)[0]
 
+        # Validate source ID after all extraction attempts
+        if "source_id" not in metadata:
+            errors.append(f"No source ID found in MEI file {mei_file_path}")
+
         shelfmark = doc.find(".//mei:monogr/mei:identifier", ns)
-        if shelfmark is not None:
-            metadata["shelfmark"] = shelfmark.text.strip()
+        shelfmark_text = safe_element_text(shelfmark)
+        if shelfmark_text:
+            metadata["shelfmark"] = shelfmark_text
 
         book_title = doc.find(".//mei:monogr/mei:title", ns)
-        if book_title is not None:
-            metadata["book_title"] = book_title.text.strip()
+        book_title_text = safe_element_text(book_title)
+        if book_title_text:
+            metadata["book_title"] = book_title_text
 
         # Extract license information
         license_elem = doc.find(".//mei:useRestrict/mei:ref", ns)
@@ -552,10 +567,10 @@ def create_description_for_work(row, file_count):
     """
     Create description for a work with multiple files.
     """
-    links_stringified = ""
     links = look_up_source_links(sources_table, row["source_id"])
-    for link in links if links else []:
-        links_stringified += make_html_link(link) + ", "
+    links_stringified = (
+        ", ".join(make_html_link(link) for link in links) if links else ""
+    )
 
     source_id = row["source_id"]
     work_number = row["work_id"].split("_")[-1]
@@ -563,7 +578,7 @@ def create_description_for_work(row, file_count):
         f"https://edition.onb.ac.at/fedora/objects/o:lau.{source_id}/methods/sdef:TEI/get?mode={work_number}"
     )
 
-    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th century lute music piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
+    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th-century lute piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
 
     part4 = f"<p>Images of the original source and renderings of the transcriptions can be found on the E-LAUTE platform: {platform_link}.</p>"
 
@@ -572,7 +587,7 @@ def create_description_for_work(row, file_count):
     else:
         part2 = ""
 
-    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation).</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
+    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation) as well as a provenance file in Turtle format for each of the MEI files.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
 
     return part1 + part4 + part2 + part3
 
@@ -732,10 +747,9 @@ def fill_out_basic_metadata_for_work(
     # Add source links as related identifiers
     links_to_source = look_up_source_links(sources_table, row["source_id"])
     if links_to_source:
-        if pd.notna(row.get("source_link")):
-            metadata["metadata"]["related_identifiers"].extend(
-                create_related_identifiers(links_to_source)
-            )
+        metadata["metadata"]["related_identifiers"].extend(
+            create_related_identifiers(links_to_source)
+        )
 
     return metadata
 
