@@ -16,6 +16,7 @@ python -m upload_to_RDM.upload_meis --production
 """
 
 import pandas as pd
+import json
 import os
 import shutil
 import sys
@@ -879,7 +880,7 @@ def update_records_in_RDM(work_ids_to_update):
                 update_response = rdm_request(
                     "PUT",
                     f"{RDM_API_URL}/records/{record_id}/draft",
-                    data=new_metadata_structure,
+                    data=json.dumps(new_metadata_structure),
                     headers=h,
                 )
                 if update_response.status_code != 200:
@@ -889,6 +890,21 @@ def update_records_in_RDM(work_ids_to_update):
                         False,
                         "UPDATE",
                         "update-draft-metadata",
+                    )
+                    continue
+
+                publish_response = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+                    headers=h,
+                )
+                if publish_response.status_code not in (200, 201, 202):
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "publish-draft-metadata-update",
                     )
                     continue
 
@@ -910,6 +926,7 @@ def update_records_in_RDM(work_ids_to_update):
                         RDM_API_URL=RDM_API_URL,
                         ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
                         record_id=new_record_id,
+                        force_metadata_only_update=FORCE_METADATA_ONLY_UPDATE,
                     )
                     failed_updates.extend(fails)
                     if not fails:

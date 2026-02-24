@@ -795,6 +795,7 @@ def upload_to_rdm(
     RDM_API_URL,
     ELAUTE_COMMUNITY_ID,
     record_id=None,
+    force_metadata_only_update=False,
 ):
     metadata = _ensure_elaute_identifier(metadata, elaute_id)
     new_upload = record_id is None
@@ -856,9 +857,15 @@ def upload_to_rdm(
                 fields_to_compare,
             )
             _log_step("compare metadata and file checksums")
-            files_changed = _files_changed_for_update(
-                record_id, local_file_paths, h, RDM_API_URL
-            )
+            if force_metadata_only_update:
+                files_changed = False
+                _log_step(
+                    "force metadata-only update: treat files_changed as False"
+                )
+            else:
+                files_changed = _files_changed_for_update(
+                    record_id, local_file_paths, h, RDM_API_URL
+                )
 
             if not metadata_changed and not files_changed:
                 _log_step("no changes detected")
@@ -953,7 +960,23 @@ def upload_to_rdm(
                     _mark_failed()
                     return failed_uploads
 
-            # Requested behavior: for existing records, do not publish.
+            if not files_changed:
+                _log_step("publish updated draft")
+                r = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+                    headers=h,
+                )
+                if r.status_code not in (200, 201, 202):
+                    _record_error(
+                        "Failed to publish updated draft for record "
+                        f"{record_id} (code: {r.status_code}) "
+                        f"response: {r.text[:300]}",
+                        step="publish_updated_draft",
+                    )
+                    _mark_failed()
+                    return failed_uploads
+
             _log_step("update flow complete")
             return failed_uploads
 
