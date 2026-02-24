@@ -54,6 +54,7 @@ RDM_API_TOKEN = None
 FILES_PATH = None
 ELAUTE_COMMUNITY_ID = None
 SELECTED_UPLOAD_FILES = None
+FORCE_METADATA_ONLY_UPDATE = True
 
 
 errors = []
@@ -769,15 +770,17 @@ def update_records_in_RDM(work_ids_to_update):
                 append_unique(failed_updates, work_id)
                 _emit_work_status(work_id, False, "UPDATE", "missing-mei-files")
                 continue
-            upload_file_paths = get_upload_files_for_work_id(
-                work_id, _get_cached_candidate_upload_files()
-            )
-            if not upload_file_paths:
-                append_unique(failed_updates, work_id)
-                _emit_work_status(
-                    work_id, False, "UPDATE", "missing-upload-files"
+            upload_file_paths = []
+            if not FORCE_METADATA_ONLY_UPDATE:
+                upload_file_paths = get_upload_files_for_work_id(
+                    work_id, _get_cached_candidate_upload_files()
                 )
-                continue
+                if not upload_file_paths:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id, False, "UPDATE", "missing-upload-files"
+                    )
+                    continue
 
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
                 work_id, mei_file_paths
@@ -856,32 +859,67 @@ def update_records_in_RDM(work_ids_to_update):
                 _emit_work_status(work_id, True, "UPDATE", "no-changes")
                 continue
 
-            # --- UPLOAD ---
-            new_version_data = r.json()
-            new_record_id = new_version_data["id"]
-
-            prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
-                work_id, upload_file_paths
-            )
-            try:
-                fails = upload_to_rdm(
-                    metadata=new_metadata_structure,
-                    elaute_id=work_id,
-                    file_paths=prepared_file_paths,
-                    RDM_API_TOKEN=RDM_API_TOKEN,
-                    RDM_API_URL=RDM_API_URL,
-                    ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
-                    record_id=new_record_id,
+            # --- UPDATE ---
+            if FORCE_METADATA_ONLY_UPDATE:
+                draft_response = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    headers=h,
                 )
-                failed_updates.extend(fails)
-                if not fails:
-                    append_unique(updated_records, work_id)
-                    _emit_work_status(work_id, True, "UPDATE")
-                else:
-                    _emit_work_status(work_id, False, "UPDATE")
-            finally:
-                if temp_bundle_dir:
-                    shutil.rmtree(temp_bundle_dir, ignore_errors=True)
+                if draft_response.status_code not in (200, 201):
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "open-draft-for-metadata-update",
+                    )
+                    continue
+
+                update_response = rdm_request(
+                    "PUT",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    data=new_metadata_structure,
+                    headers=h,
+                )
+                if update_response.status_code != 200:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "update-draft-metadata",
+                    )
+                    continue
+
+                append_unique(updated_records, work_id)
+                _emit_work_status(work_id, True, "UPDATE", "metadata-only")
+            else:
+                new_version_data = r.json()
+                new_record_id = new_version_data["id"]
+
+                prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
+                    work_id, upload_file_paths
+                )
+                try:
+                    fails = upload_to_rdm(
+                        metadata=new_metadata_structure,
+                        elaute_id=work_id,
+                        file_paths=prepared_file_paths,
+                        RDM_API_TOKEN=RDM_API_TOKEN,
+                        RDM_API_URL=RDM_API_URL,
+                        ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+                        record_id=new_record_id,
+                    )
+                    failed_updates.extend(fails)
+                    if not fails:
+                        append_unique(updated_records, work_id)
+                        _emit_work_status(work_id, True, "UPDATE")
+                    else:
+                        _emit_work_status(work_id, False, "UPDATE")
+                finally:
+                    if temp_bundle_dir:
+                        shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
         except Exception as exc:
             append_unique(failed_updates, work_id)
