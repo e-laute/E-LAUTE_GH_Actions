@@ -79,11 +79,6 @@ def rdm_request(
             backoff_seconds = retry_after
             if backoff_seconds is None:
                 backoff_seconds = min(2 ** (attempt - 1), 8)
-            print(
-                "[WARN] Rate/server limit encountered "
-                f"({response.status_code}) on {method} {url}; "
-                f"waiting {backoff_seconds}s before retry {attempt + 1}/{attempts}."
-            )
             time.sleep(backoff_seconds)
             continue
 
@@ -100,8 +95,7 @@ def get_id_from_api(url):
         response = rdm_request("GET", url, timeout=30)
         response.raise_for_status()
         return response.json().get("id")
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching community ID from {url}: {e}")
+    except requests.exceptions.RequestException:
         return None
 
 
@@ -257,7 +251,6 @@ def create_related_identifiers(links):
     for link in links:
         normalized_link = _normalize_url_identifier(link)
         if not normalized_link:
-            print("Skipping non-URL related identifier value: " f"{repr(link)}")
             continue
         related_identifiers.append(
             {
@@ -326,19 +319,11 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
 
     while next_url:
         if next_url in visited_urls:
-            print(
-                "Detected repeated pagination URL while fetching RDM records. "
-                "Stopping to avoid an infinite loop."
-            )
             break
         visited_urls.add(next_url)
 
         response = rdm_request("GET", next_url, headers=h, timeout=60)
         if response.status_code != 200:
-            print(
-                "Error fetching records from RDM: "
-                f"{response.status_code} (url: {next_url})"
-            )
             return None
 
         payload = response.json()
@@ -420,18 +405,12 @@ def _metadata_changed_for_update(
 def _get_remote_file_info(record_id, headers, api_url):
     try:
         response = rdm_request(
-            "GET",
-            f"{api_url}/records/{record_id}/files", headers=headers
+            "GET", f"{api_url}/records/{record_id}/files", headers=headers
         )
         if response.status_code != 200:
-            print(
-                f"Failed to fetch file list for record {record_id} "
-                f"(code: {response.status_code})"
-            )
             return None
         entries = response.json().get("entries", [])
-    except Exception as exc:
-        print(f"Failed to fetch file list for record {record_id}: {exc}")
+    except Exception:
         return None
 
     remote_info = {}
@@ -457,37 +436,22 @@ def _calculate_local_md5_checksum(file_path):
 def _files_changed_for_update(record_id, local_file_paths, headers, api_url):
     remote_info = _get_remote_file_info(record_id, headers, api_url)
     if remote_info is None:
-        print("Could not verify remote files; assuming changes exist.")
         return True
 
     local_names = {path.name for path in local_file_paths}
     remote_names = set(remote_info.keys())
 
     if local_names != remote_names:
-        missing = sorted(local_names - remote_names)
-        extra = sorted(remote_names - local_names)
-        if missing:
-            print(f"Remote missing files: {missing}")
-        if extra:
-            print(f"Remote has extra files: {extra}")
         return True
 
     for path in local_file_paths:
         remote_entry = remote_info.get(path.name, {})
         remote_checksum = remote_entry.get("checksum")
         if not remote_checksum:
-            print(
-                "Remote checksum missing for "
-                f"{path.name}; assuming changes exist."
-            )
             return True
 
         local_checksum = _calculate_local_md5_checksum(path)
         if not compare_hashed_files(remote_checksum, local_checksum):
-            print(
-                "Checksum mismatch for "
-                f"{path.name}: remote={remote_checksum}, local={local_checksum}"
-            )
             return True
 
     return False
@@ -496,6 +460,7 @@ def _files_changed_for_update(record_id, local_file_paths, headers, api_url):
 def _upload_initialized_files(
     file_entries, local_file_paths, headers, file_headers
 ):
+    errors = []
     file_links_by_key = {}
     for entry in file_entries:
         key = entry.get("key")
@@ -507,7 +472,8 @@ def _upload_initialized_files(
         filename = file_path.name
         links = file_links_by_key.get(filename, {})
         if "content" not in links or "commit" not in links:
-            raise AssertionError(f"Missing upload/commit links for {filename}.")
+            errors.append(f"Missing upload/commit links for {filename}.")
+            continue
 
         with file_path.open("rb") as fp:
             response = rdm_request(
@@ -516,16 +482,21 @@ def _upload_initialized_files(
                 data=fp,
                 headers=file_headers,
             )
-        assert response.status_code == 200, (
-            f"Failed to upload file content {filename} "
-            f"(code: {response.status_code})"
-        )
+        if response.status_code != 200:
+            errors.append(
+                f"Failed to upload file content {filename} "
+                f"(code: {response.status_code}) response: {response.text[:300]}"
+            )
+            continue
 
         response = rdm_request("POST", links["commit"], headers=headers)
-        assert response.status_code == 200, (
-            f"Failed to commit file {filename} (code: {response.status_code}) "
-            f"response: {response.text[:300]}"
-        )
+        if response.status_code != 200:
+            errors.append(
+                f"Failed to commit file {filename} (code: {response.status_code}) "
+                f"response: {response.text[:300]}"
+            )
+
+    return errors
 
 
 def _sync_draft_files_with_local(
@@ -542,25 +513,30 @@ def _sync_draft_files_with_local(
     - delete removed files from draft
     - re-upload only new/changed files
     """
+    errors = []
+
     response = rdm_request(
         "POST",
         f"{api_url}/records/{record_id}/draft/actions/files-import",
         headers=headers,
     )
-    assert response.status_code in (200, 201), (
-        "Failed to import files from previous version for record "
-        f"{record_id} (code: {response.status_code}) "
-        f"response: {response.text[:300]}"
-    )
+    if response.status_code not in (200, 201):
+        errors.append(
+            "Failed to import files from previous version for record "
+            f"{record_id} (code: {response.status_code}) "
+            f"response: {response.text[:300]}"
+        )
+        return errors
 
     response = rdm_request(
-        "GET",
-        f"{api_url}/records/{record_id}/draft/files", headers=headers
+        "GET", f"{api_url}/records/{record_id}/draft/files", headers=headers
     )
-    assert response.status_code == 200, (
-        f"Failed to list draft files for record {record_id} "
-        f"(code: {response.status_code}) response: {response.text[:300]}"
-    )
+    if response.status_code != 200:
+        errors.append(
+            f"Failed to list draft files for record {record_id} "
+            f"(code: {response.status_code}) response: {response.text[:300]}"
+        )
+        return errors
     draft_entries = response.json().get("entries", [])
     draft_files_by_key = {
         entry.get("key"): entry for entry in draft_entries if entry.get("key")
@@ -577,10 +553,11 @@ def _sync_draft_files_with_local(
             f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
             headers=headers,
         )
-        assert response.status_code in (200, 204), (
-            f"Failed to delete draft file {filename} from record {record_id} "
-            f"(code: {response.status_code}) response: {response.text[:300]}"
-        )
+        if response.status_code not in (200, 204):
+            errors.append(
+                f"Failed to delete draft file {filename} from record {record_id} "
+                f"(code: {response.status_code}) response: {response.text[:300]}"
+            )
 
     files_to_upload = []
     for file_path in local_file_paths:
@@ -601,10 +578,12 @@ def _sync_draft_files_with_local(
                 f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
                 headers=headers,
             )
-            assert response.status_code in (200, 204), (
-                f"Failed to replace changed draft file {filename} "
-                f"(code: {response.status_code}) response: {response.text[:300]}"
-            )
+            if response.status_code not in (200, 204):
+                errors.append(
+                    f"Failed to replace changed draft file {filename} "
+                    f"(code: {response.status_code}) response: {response.text[:300]}"
+                )
+                continue
             files_to_upload.append(file_path)
 
     if files_to_upload:
@@ -615,16 +594,21 @@ def _sync_draft_files_with_local(
             data=json.dumps(file_entries),
             headers=headers,
         )
-        assert response.status_code == 201, (
-            f"Failed to initialize files for record {record_id} "
-            f"(code: {response.status_code}) response: {response.text[:300]}"
-        )
-        _upload_initialized_files(
+        if response.status_code != 201:
+            errors.append(
+                f"Failed to initialize files for record {record_id} "
+                f"(code: {response.status_code}) response: {response.text[:300]}"
+            )
+            return errors
+        upload_errors = _upload_initialized_files(
             response.json().get("entries", []),
             files_to_upload,
             headers,
             file_headers,
         )
+        errors.extend(upload_errors)
+
+    return errors
 
 
 def upload_to_rdm(
@@ -641,134 +625,149 @@ def upload_to_rdm(
     records_api_url = f"{RDM_API_URL}/records"
 
     failed_uploads = []
+    record_errors = []
+    failed_step = None
     local_file_paths = [Path(path) for path in file_paths]
-    print(f"Processing {elaute_id}: {len(local_file_paths)} files")
     h, fh = set_headers(RDM_API_TOKEN)
     files_changed = False
 
-    if not new_upload:
-        metadata_payload = _extract_metadata_payload(metadata)
-        fields_to_compare = [
-            "title",
-            "creators",
-            "contributors",
-            "description",
-            "identifiers",
-            "dates",
-            "publisher",
-            "references",
-            "related_identifiers",
-            "resource_type",
-            "rights",
-        ]
-
-        r = rdm_request("GET", f"{RDM_API_URL}/records/{record_id}", headers=h)
-        if r.status_code != 200:
-            print(f"Failed to fetch record {record_id} (code: {r.status_code})")
+    def _mark_failed():
+        if elaute_id not in failed_uploads:
             failed_uploads.append(elaute_id)
-            return failed_uploads
 
-        metadata_changed, changed_fields = _metadata_changed_for_update(
-            r.json(),
-            metadata_payload,
-            fields_to_compare,
-        )
-        files_changed = _files_changed_for_update(
-            record_id, local_file_paths, h, RDM_API_URL
-        )
+    def _record_error(message, step="unknown"):
+        nonlocal failed_step
+        if failed_step is None:
+            failed_step = step
+        record_errors.append(message)
 
-        if not metadata_changed and not files_changed:
-            print(
-                "No metadata or file changes detected for "
-                f"{elaute_id}; skipping update."
-            )
-            return failed_uploads
-        if metadata_changed:
-            print(
-                "Metadata changes detected for "
-                f"{elaute_id} in fields: {', '.join(changed_fields)}"
-            )
-        elif files_changed:
-            print(
-                "Metadata unchanged but file changes detected for "
-                f"{elaute_id}; creating new version."
-            )
+    try:
+        if not new_upload:
+            metadata_payload = _extract_metadata_payload(metadata)
+            fields_to_compare = [
+                "title",
+                "creators",
+                "contributors",
+                "description",
+                "identifiers",
+                "dates",
+                "publisher",
+                "references",
+                "related_identifiers",
+                "resource_type",
+                "rights",
+            ]
 
-        if files_changed:
-            # File changes require a new version draft.
             r = rdm_request(
-                "POST",
-                f"{RDM_API_URL}/records/{record_id}/versions",
-                headers=h,
+                "GET", f"{RDM_API_URL}/records/{record_id}", headers=h
             )
-            if r.status_code != 201:
-                print(
-                    "Failed to create new version for record "
-                    f"{record_id} (code: {r.status_code})"
+            if r.status_code != 200:
+                _record_error(
+                    f"Failed to fetch record {record_id} (code: {r.status_code})",
+                    step="fetch_record",
                 )
-                failed_uploads.append(elaute_id)
+                _mark_failed()
                 return failed_uploads
 
-            new_record_id = r.json()["id"]
-            print(
-                f"Created new version {new_record_id} for elaute_id {elaute_id}"
+            metadata_changed, changed_fields = _metadata_changed_for_update(
+                r.json(),
+                metadata_payload,
+                fields_to_compare,
             )
-            record_id = new_record_id
+            files_changed = _files_changed_for_update(
+                record_id, local_file_paths, h, RDM_API_URL
+            )
 
-            # Explicitly enter draft edit mode for the new version draft.
+            if not metadata_changed and not files_changed:
+                return failed_uploads
+
+            if files_changed:
+                # File changes require a new version draft.
+                r = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/versions",
+                    headers=h,
+                )
+                if r.status_code != 201:
+                    _record_error(
+                        "Failed to create new version for record "
+                        f"{record_id} (code: {r.status_code})",
+                        step="create_new_version",
+                    )
+                    _mark_failed()
+                    return failed_uploads
+
+                new_record_id = r.json()["id"]
+                record_id = new_record_id
+
+                # Explicitly enter draft edit mode for the new version draft.
+                r = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    headers=h,
+                )
+                if r.status_code not in (200, 201):
+                    _record_error(
+                        f"Failed to enter edit mode for draft {record_id} "
+                        f"(code: {r.status_code})",
+                        step="open_draft_for_version",
+                    )
+                    _mark_failed()
+                    return failed_uploads
+            else:
+                # Metadata-only updates edit the currently published record draft.
+                r = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    headers=h,
+                )
+                if r.status_code not in (200, 201):
+                    _record_error(
+                        f"Failed to enter edit mode for draft {record_id} "
+                        f"(code: {r.status_code})",
+                        step="open_draft_for_metadata_update",
+                    )
+                    _mark_failed()
+                    return failed_uploads
+
             r = rdm_request(
-                "POST",
+                "PUT",
                 f"{RDM_API_URL}/records/{record_id}/draft",
+                data=json.dumps(metadata),
                 headers=h,
             )
-            if r.status_code not in (200, 201):
-                print(
-                    f"Failed to enter edit mode for draft {record_id} "
-                    f"(code: {r.status_code})"
+            if r.status_code != 200:
+                _record_error(
+                    f"Failed to update draft {record_id} (code: {r.status_code}) "
+                    f"response: {r.text[:300]}",
+                    step="update_draft_metadata",
                 )
-                failed_uploads.append(elaute_id)
-                return failed_uploads
-        else:
-            # Metadata-only updates edit the currently published record draft.
-            r = rdm_request(
-                "POST",
-                f"{RDM_API_URL}/records/{record_id}/draft",
-                headers=h,
-            )
-            if r.status_code not in (200, 201):
-                print(
-                    f"Failed to enter edit mode for draft {record_id} "
-                    f"(code: {r.status_code})"
-                )
-                failed_uploads.append(elaute_id)
+                _mark_failed()
                 return failed_uploads
 
-        r = rdm_request(
-            "PUT",
-            f"{RDM_API_URL}/records/{record_id}/draft",
-            data=json.dumps(metadata),
-            headers=h,
-        )
-        if r.status_code != 200:
-            print(f"Failed to update draft {record_id} (code: {r.status_code})")
-            failed_uploads.append(elaute_id)
+            # Get links from the draft update response.
+            links = r.json()["links"]
+
+            # If file differences were detected, start from previous-version files
+            # and only apply local delta.
+            if files_changed:
+                sync_errors = _sync_draft_files_with_local(
+                    record_id=record_id,
+                    local_file_paths=local_file_paths,
+                    links=links,
+                    headers=h,
+                    file_headers=fh,
+                    api_url=RDM_API_URL,
+                )
+                if sync_errors:
+                    for err in sync_errors:
+                        _record_error(err, step="sync_draft_files")
+                    _mark_failed()
+                    return failed_uploads
+
+            # Requested behavior: for existing records, do not publish.
             return failed_uploads
 
-        # Get links from the draft update response
-        links = r.json()["links"]
-
-        # If file differences were detected, start from previous-version files
-        # and only apply local delta.
-        if files_changed:
-            _sync_draft_files_with_local(
-                record_id=record_id,
-                local_file_paths=local_file_paths,
-                links=links,
-                headers=h,
-                file_headers=fh,
-                api_url=RDM_API_URL,
-            )
-    else:
         # Create new draft record
         r = rdm_request(
             "POST",
@@ -776,11 +775,18 @@ def upload_to_rdm(
             data=json.dumps(metadata),
             headers=h,
         )
-        assert (
-            r.status_code == 201
-        ), f"Failed to create record (code: {r.status_code})"
+        if r.status_code != 201:
+            _record_error(
+                f"Failed to create record (code: {r.status_code}) "
+                f"response: {r.text[:300]}",
+                step="create_record",
+            )
+            _mark_failed()
+            return failed_uploads
+
         links = r.json()["links"]
         record_id = r.json()["id"]
+
         # Keep current per-file initialization behavior for new records.
         for file_path in local_file_paths:
             filename = file_path.name
@@ -790,18 +796,26 @@ def upload_to_rdm(
                 data=json.dumps([{"key": filename}]),
                 headers=h,
             )
-            assert r.status_code == 201, (
-                f"Failed to initialize file {filename} (code: {r.status_code}) "
-                f"response: {r.text[:300]}"
-            )
-            _upload_initialized_files(
+            if r.status_code != 201:
+                _record_error(
+                    f"Failed to initialize file {filename} (code: {r.status_code}) "
+                    f"response: {r.text[:300]}",
+                    step="init_file_slot",
+                )
+                _mark_failed()
+                return failed_uploads
+            upload_errors = _upload_initialized_files(
                 r.json().get("entries", []),
                 [file_path],
                 h,
                 fh,
             )
+            if upload_errors:
+                for err in upload_errors:
+                    _record_error(err, step="upload_or_commit_file")
+                _mark_failed()
+                return failed_uploads
 
-    if new_upload:
         # Set community review request first.
         r = rdm_request(
             "PUT",
@@ -815,12 +829,13 @@ def upload_to_rdm(
             ),
         )
         if r.status_code != 200:
-            print(
+            _record_error(
                 "Failed to set review for record "
                 f"{record_id} (code: {r.status_code}) "
-                f"response: {r.text[:300]}"
+                f"response: {r.text[:300]}",
+                step="set_community_review",
             )
-            failed_uploads.append(elaute_id)
+            _mark_failed()
             return failed_uploads
 
         # Create curation request for the record.
@@ -831,12 +846,13 @@ def upload_to_rdm(
             data=json.dumps({"topic": {"record": record_id}}),
         )
         if r.status_code != 201:
-            print(
+            _record_error(
                 "Failed to create curation for record "
                 f"{record_id} (code: {r.status_code}) "
-                f"response: {r.text[:300]}"
+                f"response: {r.text[:300]}",
+                step="create_curation",
             )
-            failed_uploads.append(elaute_id)
+            _mark_failed()
             return failed_uploads
 
         # Submit community review request.
@@ -846,61 +862,30 @@ def upload_to_rdm(
             headers=h,
         )
         if r.status_code != 202:
-            print(
+            _record_error(
                 "Failed to submit review for record "
                 f"{record_id} (code: {r.status_code}) "
-                f"response: {r.text[:300]}"
+                f"response: {r.text[:300]}",
+                step="submit_review",
             )
-            failed_uploads.append(elaute_id)
+            _mark_failed()
             return failed_uploads
 
-        print(
-            "[INFO] Draft upload complete and submitted for review. "
-            f"Draft: {RDM_API_URL}/uploads/{record_id}"
+        return failed_uploads
+    except Exception as exc:
+        _record_error(
+            f"Unhandled upload error for {elaute_id}: {exc}",
+            step="unexpected_exception",
         )
-    else:
-        # Publish update workflow:
-        # - metadata-only: edit draft -> update metadata -> publish
-        # - file changes: create version -> update metadata/files -> publish -> submit-review
-        r = rdm_request(
-            "POST",
-            f"{records_api_url}/{record_id}/draft/actions/publish",
-            headers=h,
-        )
-        if r.status_code not in (200, 201, 202):
-            print(
-                "Failed to publish updated record "
-                f"{record_id} (code: {r.status_code}) "
-                f"response: {r.text[:300]}"
-            )
-            failed_uploads.append(elaute_id)
-            return failed_uploads
-
-        if files_changed:
-            r = rdm_request(
-                "POST",
-                f"{records_api_url}/{record_id}/draft/actions/submit-review",
-                headers=h,
-            )
-            if r.status_code != 202:
-                print(
-                    "Failed to submit review for updated record "
-                    f"{record_id} (code: {r.status_code}) "
-                    f"response: {r.text[:300]}"
-                )
-                failed_uploads.append(elaute_id)
-                return failed_uploads
-            print(
-                "[INFO] New version with file changes published and submitted for review. "
-                f"Record: {RDM_API_URL}/records/{record_id}"
-            )
+        _mark_failed()
+        return failed_uploads
+    finally:
+        status = "FAILED" if failed_uploads else "SUCCESS"
+        if status == "FAILED":
+            step = failed_step or "unknown"
+            print(f"{elaute_id}: FAILED ({step})")
         else:
-            print(
-                "[INFO] Metadata-only update published. "
-                f"Record: {RDM_API_URL}/records/{record_id}"
-            )
-
-    return failed_uploads
+            print(f"{elaute_id}: SUCCESS")
 
 
 def compare_hashed_files(current_value, new_value):
