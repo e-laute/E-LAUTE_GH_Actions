@@ -372,6 +372,8 @@ def add_section_foldir_to_ed(
 
     if len(sections) != 1:
         raise RuntimeError(f"{active_dom["filename"]} number of section is not 1")
+    else:
+        section = sections[0]
 
     if "dipl" in help_dom["notationtype"]:
         section_info = get_section_info_dipl(help_dom)
