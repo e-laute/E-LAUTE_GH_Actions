@@ -299,6 +299,7 @@ def run_upload_on_id_folders(
     upload_mode: str,
 ) -> bool:
     print("Upload...")
+    print(f"Upload mode: {upload_mode}")
     failed_ids: list[str] = []
     succeeded_ids: list[str] = []
 
@@ -359,6 +360,33 @@ def run_upload_on_id_folders(
 
         if result.returncode != 0:
             failed_ids.append(folder_id)
+            expected_token_env = (
+                "RDM_TOKEN" if upload_mode == "testing" else "RDM_API_TOKEN_JJ"
+            )
+            token_present = bool(env.get(expected_token_env, ""))
+            print(
+                "Upload debug "
+                f"[{folder_id}]: mode={upload_mode}, "
+                f"returncode={result.returncode}, "
+                f"{expected_token_env}={'present' if token_present else 'missing'}"
+            )
+            print(
+                "Upload debug "
+                f"[{folder_id}]: command="
+                f"{sys.executable} -m upload_to_RDM.upload_meis --{upload_mode}"
+            )
+            stdout_excerpt = (result.stdout or "").strip()
+            stderr_excerpt = (result.stderr or "").strip()
+            if stdout_excerpt:
+                print(
+                    f"Upload debug [{folder_id}] stdout:\n"
+                    f"{stdout_excerpt[-4000:]}"
+                )
+            if stderr_excerpt:
+                print(
+                    f"Upload debug [{folder_id}] stderr:\n"
+                    f"{stderr_excerpt[-4000:]}"
+                )
             if not record_lines:
                 print(f"{folder_id}: FAILED")
         else:
