@@ -72,6 +72,14 @@ def _emit_work_status(work_id, success, mode, detail=None):
     print(message)
 
 
+def _format_exception_detail(exc):
+    exc_type = type(exc).__name__
+    exc_text = str(exc).strip()
+    if exc_text:
+        return f"{exc_type}: {exc_text[:300]}"
+    return exc_type
+
+
 def get_metadata_df_from_mei(mei_file_path):
     try:
         with open(mei_file_path, "rb") as f:
@@ -714,9 +722,14 @@ def update_records_in_RDM(work_ids_to_update):
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
-        except Exception:
+        except Exception as exc:
             append_unique(failed_updates, work_id)
-            _emit_work_status(work_id, False, "UPDATE", "unexpected-error")
+            _emit_work_status(
+                work_id,
+                False,
+                "UPDATE",
+                f"unexpected-error: {_format_exception_detail(exc)}",
+            )
             continue
 
     return updated_records, list(dict.fromkeys(failed_updates))
@@ -815,9 +828,14 @@ def upload_mei_files(work_ids):
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
-        except Exception:
+        except Exception as exc:
             append_unique(failed_uploads, work_id)
-            _emit_work_status(work_id, False, "NEW", "unexpected-error")
+            _emit_work_status(
+                work_id,
+                False,
+                "NEW",
+                f"unexpected-error: {_format_exception_detail(exc)}",
+            )
     return list(dict.fromkeys(failed_uploads))
 
 
@@ -858,7 +876,8 @@ def main() -> int:
                 has_failures = True
 
         return 1 if has_failures else 0
-    except Exception:
+    except Exception as exc:
+        print(f"upload_meis.py fatal error: {_format_exception_detail(exc)}")
         return 1
 
 
