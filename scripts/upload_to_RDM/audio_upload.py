@@ -3,7 +3,7 @@ Upload-script for the E-LAUTE audio files to the TU-RDM platform.
 
 Usage:
 cd scripts
-python -m upload_to_RDM.audio-upload
+python -m upload_to_RDM.audio_upload
 
 Make sure to set the TESTING_MODE flag to false when ready to upload to the real RDM.
 
@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -51,8 +52,13 @@ pd.set_option("display.max_columns", None)
 
 ROOT_DIR = Path(__file__).resolve().parent
 
-TESTING_MODE = True
-TESTING_WORK_ID = "Sotheby_tablature_n36"
+TESTING_MODE = False
+TESTING_WORK_ID = ""
+SELECTED_WORK_IDS = []
+COMPARE_IDS_ONLY = False
+SKIP_WORK_IDS = []
+ONLY_NEW_UPLOADS = True
+PROCESS_DELAY_SECONDS = 5
 
 MP3_VBR_QUALITY = 2  # LAME VBR ~190-200 kbps (approx. 192 kbps)
 
@@ -101,32 +107,93 @@ def _normalize_for_matching(text):
     return re.sub(r"\s+", "", str(text or "")).lower()
 
 
-def _filter_metadata_for_testing_work_id(metadata_for_upload):
-    if not TESTING_WORK_ID:
-        raise ValueError("TESTING_MODE requires TESTING_WORK_ID to be set.")
+def _get_requested_work_ids():
+    requested_work_ids = []
+    if SELECTED_WORK_IDS:
+        for work_id in SELECTED_WORK_IDS:
+            text = str(work_id).strip()
+            if text:
+                requested_work_ids.append(text)
+    elif TESTING_WORK_ID:
+        text = str(TESTING_WORK_ID).strip()
+        if text:
+            requested_work_ids.append(text)
+    return requested_work_ids
 
-    testing_work_id = str(TESTING_WORK_ID)
-    testing_work_id_alias = _normalize_work_id_alias(testing_work_id)
-    normalized_target = _normalize_for_matching(testing_work_id_alias)
-    matches = metadata_for_upload[
+
+def _filter_metadata_for_selected_work_ids(metadata_for_upload):
+    requested_work_ids = _get_requested_work_ids()
+    if TESTING_MODE and not requested_work_ids:
+        raise ValueError(
+            "TESTING_MODE requires TESTING_WORK_ID or SELECTED_WORK_IDS."
+        )
+
+    if not requested_work_ids:
+        return metadata_for_upload, []
+
+    normalized_targets = {
+        _normalize_for_matching(_normalize_work_id_alias(work_id))
+        for work_id in requested_work_ids
+    }
+    is_selected = (
         metadata_for_upload["work_id"]
         .astype(str)
         .apply(
             lambda work_id: _normalize_for_matching(work_id)
-            == normalized_target
+            in normalized_targets
         )
-    ]
+    )
+    selected = metadata_for_upload[is_selected].copy()
 
-    if matches.empty:
+    if selected.empty:
         raise ValueError(
-            "TESTING_WORK_ID not found in metadata_for_upload: "
-            f"{TESTING_WORK_ID} (normalized to {testing_work_id_alias})"
+            "Requested work IDs not found in metadata_for_upload: "
+            f"{requested_work_ids}"
         )
 
-    selected = matches.head(1)
-    selected_work_id = selected.iloc[0]["work_id"]
-    print(f"TESTING mode: selected work_id '{selected_work_id}'")
-    return selected
+    selected_work_ids = list(
+        dict.fromkeys(selected["work_id"].dropna().astype(str).tolist())
+    )
+    mode_label = "TESTING" if TESTING_MODE else "PRODUCTION"
+    print(
+        f"{mode_label} mode: limiting upload to "
+        f"{len(selected_work_ids)} selected work_ids"
+    )
+    print(f"Selected work_ids: {selected_work_ids}")
+    return selected, selected_work_ids
+
+
+def _filter_metadata_for_skipped_work_ids(metadata_for_upload):
+    if not SKIP_WORK_IDS:
+        return metadata_for_upload
+
+    normalized_skip_ids = {
+        _normalize_work_id_alias(str(work_id).strip())
+        for work_id in SKIP_WORK_IDS
+        if str(work_id).strip()
+    }
+    if not normalized_skip_ids:
+        return metadata_for_upload
+
+    skip_ids_for_matching = {
+        _normalize_for_matching(work_id) for work_id in normalized_skip_ids
+    }
+    is_skipped = (
+        metadata_for_upload["work_id"]
+        .astype(str)
+        .apply(
+            lambda work_id: _normalize_for_matching(work_id)
+            in skip_ids_for_matching
+        )
+    )
+    skipped_rows = metadata_for_upload[is_skipped]
+    if not skipped_rows.empty:
+        skipped_work_ids = list(
+            dict.fromkeys(skipped_rows["work_id"].dropna().astype(str).tolist())
+        )
+        print("Skipping work_ids from SKIP_WORK_IDS: " f"{skipped_work_ids}")
+
+    return metadata_for_upload[~is_skipped].copy()
 
 
 def _find_testing_wav_files(release_folder, work_id):
@@ -379,6 +446,17 @@ def load_sources_table():
 def build_metadata_df(form_responses_df, id_table):
     metadata_df = form_responses_df.copy()
 
+    def split_name(value):
+        if pd.isna(value):
+            return pd.Series(["", ""])
+        text = str(value).strip()
+        if not text:
+            return pd.Series(["", ""])
+        parts = [part.strip() for part in text.split(",", 1)]
+        if len(parts) == 2:
+            return pd.Series(parts)
+        return pd.Series([text, ""])
+
     metadata_df["timestamp"] = pd.to_datetime(
         metadata_df["timestamp"], format="%d/%m/%Y %H:%M:%S", errors="coerce"
     )
@@ -388,13 +466,13 @@ def build_metadata_df(form_responses_df, id_table):
 
     metadata_df[["performer_lastname", "performer_firstname"]] = metadata_df[
         "performer"
-    ].str.split(", ", expand=True)
+    ].apply(split_name)
 
     metadata_df["licence"] = "CC BY-SA 4.0"
 
     metadata_df[["producer_lastname", "producer_firstname"]] = metadata_df[
         "producer"
-    ].str.split(", ", expand=True)
+    ].apply(split_name)
 
     metadata_df["recording_id"] = (
         metadata_df["work_id"].str.replace(", ", "_")
@@ -470,7 +548,17 @@ def build_metadata_df(form_responses_df, id_table):
 
     if not remaining_missing.empty:
         print("The following work_ids could not be found in id_table:")
-        print(remaining_missing["work_id"].tolist())
+        missing_work_ids = list(
+            dict.fromkeys(remaining_missing["work_id"].dropna().tolist())
+        )
+        print(missing_work_ids)
+        print(
+            "Skipping upload for these work_ids because required id_table "
+            "fields are missing."
+        )
+        merged_df = merged_df[
+            ~merged_df["work_id"].isin(missing_work_ids)
+        ].copy()
     return merged_df
 
 
@@ -507,22 +595,6 @@ def rename_audio_files(
         work_id_candidates = _candidate_work_id_aliases(work_id)
 
         matching_file = None
-        # special cases because there is an additional space in the work_id in the filename...
-        if work_id == "Ger_1533-1_n38":
-            matching_file = (
-                release_folder
-                / "Gerle 1533-1, Adieu mes amours, Ger_ 1533-1_n38 - Christian Velasco.wav"
-            )
-        if work_id == "Ger_1533-1_n42":
-            matching_file = (
-                release_folder
-                / "Gerle 1533-1, En lombre, Ger_ 1533-1_n42 - Christian Velasco.wav"
-            )
-        if work_id == "Ger_1533-1_n39":
-            matching_file = (
-                release_folder
-                / "Gerle 1533-1, Mile regres, Ger_ 1533-1_n39 - Christian Velasco.wav"
-            )
 
         if matching_file is None:
             for file_path in all_audio_files:
@@ -969,10 +1041,10 @@ def tag_wav_files_with_metadata(
 
 
 def create_description(row, sources_table):
-    links_stringified = ""
     links = look_up_source_links(sources_table, row["source_id"])
-    for link in links if links else []:
-        links_stringified += make_html_link(link) + ", "
+    links_stringified = (
+        ", ".join(make_html_link(link) for link in links) if links else ""
+    )
 
     source_id = row["source_id"]
     work_number = row["work_id"].split("_")[-1]
@@ -1123,7 +1195,6 @@ def fill_out_basic_metadata(row, sources_table):
                     "subject": "Arts (arts, history of arts, performing arts, music)",
                 },
                 {"subject": "lute music"},
-                {"subject": "medieval"},
             ],
         }
     }
@@ -1143,10 +1214,9 @@ def fill_out_basic_metadata(row, sources_table):
 
     links_to_source = look_up_source_links(sources_table, row["source_id"])
     if links_to_source:
-        if pd.notna(row["source_link"]):
-            metadata["metadata"]["related_identifiers"].extend(
-                create_related_identifiers(links_to_source)
-            )
+        metadata["metadata"]["related_identifiers"].extend(
+            create_related_identifiers(links_to_source)
+        )
 
     return metadata
 
@@ -1175,6 +1245,54 @@ def get_existing_records_by_work_id():
     return dict(zip(latest_records["elaute_id"], latest_records["record_id"]))
 
 
+def print_rdm_identifier_comparison_and_stop():
+    records_df = get_records_from_RDM(
+        RDM_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
+    )
+    if records_df is None or records_df.empty:
+        print("No records returned from RDM.")
+        return
+
+    records_df = records_df.dropna(subset=["elaute_id"]).copy()
+    if records_df.empty:
+        print("No records with identifier scheme 'other' found in RDM.")
+        return
+
+    records_df["elaute_id"] = records_df["elaute_id"].apply(
+        _normalize_work_id_alias
+    )
+    records_df["updated_dt"] = pd.to_datetime(
+        records_df["updated"], errors="coerce"
+    )
+    latest_records = (
+        records_df.sort_values("updated_dt")
+        .groupby("elaute_id")
+        .tail(1)
+        .sort_values("elaute_id")
+    )
+
+    environment = "TEST" if TESTING_MODE else "PRODUCTION"
+    print(
+        f"\nFetched {len(latest_records)} published work IDs from "
+        f"{environment} RDM "
+        "(metadata.identifiers with scheme='other'):"
+    )
+    for _idx, row in latest_records.iterrows():
+        print(f"- {row['elaute_id']} -> record {row['record_id']}")
+
+    requested_work_ids = _get_requested_work_ids()
+    if requested_work_ids:
+        available_ids = set(latest_records["elaute_id"].tolist())
+        print("\nRequested work_id comparison against published records:")
+        for work_id in requested_work_ids:
+            selected = _normalize_work_id_alias(str(work_id))
+            is_present = selected in available_ids
+            print(
+                f"- {work_id} (normalized: {selected}): "
+                f"{'FOUND' if is_present else 'NOT FOUND'}"
+            )
+
+
 def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
     existing_records = get_existing_records_by_work_id()
     existing_work_ids = set(existing_records.keys())
@@ -1196,6 +1314,16 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
         f"{len(existing_work_ids_to_check)}"
     )
 
+    processing_df = metadata_for_upload
+    if ONLY_NEW_UPLOADS:
+        processing_df = metadata_for_upload[
+            metadata_for_upload["work_id"].isin(new_work_ids)
+        ].copy()
+        print(
+            "ONLY_NEW_UPLOADS=True: skipping existing records and only creating "
+            f"new uploads ({len(processing_df)} work_ids)."
+        )
+
     audio_dir = _as_path(audio_files_path)
     json_dir = _as_path(json_metadata_path)
 
@@ -1213,7 +1341,11 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
         return files
 
     failed_uploads = []
-    for _index, row in metadata_for_upload.iterrows():
+    rows = list(processing_df.iterrows())
+    if not rows:
+        print("No work_ids to process after current filters/settings.")
+        return new_work_ids, existing_work_ids_to_check
+    for index, (_row_idx, row) in enumerate(rows):
         work_id = row["work_id"]
         metadata = fill_out_basic_metadata(row, sources_table)
         files = _collect_upload_files(work_id)
@@ -1234,6 +1366,13 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
             print(f"Error processing work_id {work_id}: {str(e)}")
             failed_uploads.append(work_id)
 
+        if index < len(rows) - 1 and PROCESS_DELAY_SECONDS > 0:
+            print(
+                "Waiting "
+                f"{PROCESS_DELAY_SECONDS} seconds before next work_id..."
+            )
+            time.sleep(PROCESS_DELAY_SECONDS)
+
     if failed_uploads:
         print("\nFAILED UPLOADS:")
         for work_id in failed_uploads:
@@ -1244,6 +1383,13 @@ def process_work_ids(metadata_for_upload, audio_files_path, json_metadata_path):
 
 def main():
     setup_config()
+
+    if COMPARE_IDS_ONLY:
+        print_rdm_identifier_comparison_and_stop()
+        print(
+            "\nStopped after RDM identifier comparison (COMPARE_IDS_ONLY=True)."
+        )
+        return
 
     audio_files_folder_path = copy_drive_files()
 
@@ -1256,28 +1402,28 @@ def main():
 
     merged_df = build_metadata_df(form_responses_df, id_table)
     metadata_for_upload = build_metadata_for_upload(merged_df)
+    metadata_for_upload = _filter_metadata_for_skipped_work_ids(
+        metadata_for_upload
+    )
     release_folder = _as_path(audio_files_folder_path) / "release"
-    selected_work_id = None
-
-    if TESTING_MODE:
-        metadata_for_upload = _filter_metadata_for_testing_work_id(
-            metadata_for_upload
-        )
-        selected_work_id = metadata_for_upload.iloc[0]["work_id"]
-        print(
-            "TESTING mode: limiting upload to "
-            f"{len(metadata_for_upload)} work_id"
-        )
+    metadata_for_upload, selected_work_ids = (
+        _filter_metadata_for_selected_work_ids(metadata_for_upload)
+    )
 
     rename_targets = None
-    if TESTING_MODE:
-        rename_targets = _find_testing_wav_files(
-            release_folder, selected_work_id
-        )
-        if not rename_targets:
+    if selected_work_ids:
+        rename_targets = []
+        missing_selection_wavs = []
+        for selected_work_id in selected_work_ids:
+            matches = _find_testing_wav_files(release_folder, selected_work_id)
+            if not matches:
+                missing_selection_wavs.append(selected_work_id)
+            else:
+                rename_targets.extend(matches)
+        if missing_selection_wavs:
             raise FileNotFoundError(
-                "No WAV file found for TESTING_WORK_ID in release folder: "
-                f"{selected_work_id}"
+                "No WAV file found for selected work_id(s) in release folder: "
+                f"{missing_selection_wavs}"
             )
 
     renamed_files_by_work_id = rename_audio_files(
@@ -1287,20 +1433,26 @@ def main():
     )
 
     target_wav_files = None
-    if TESTING_MODE:
-        renamed_wav = renamed_files_by_work_id.get(selected_work_id)
-        if renamed_wav is None:
-            resolved_wavs = sorted(
-                release_folder.glob(f"{selected_work_id}_*.wav")
-            )
-            if resolved_wavs:
-                renamed_wav = resolved_wavs[0]
-        if renamed_wav is None or not renamed_wav.exists():
+    if selected_work_ids:
+        target_wav_files = []
+        unresolved_selected_ids = []
+        for selected_work_id in selected_work_ids:
+            renamed_wav = renamed_files_by_work_id.get(selected_work_id)
+            if renamed_wav is None:
+                resolved_wavs = sorted(
+                    release_folder.glob(f"{selected_work_id}_*.wav")
+                )
+                if resolved_wavs:
+                    renamed_wav = resolved_wavs[0]
+            if renamed_wav is None or not renamed_wav.exists():
+                unresolved_selected_ids.append(selected_work_id)
+                continue
+            target_wav_files.append(renamed_wav)
+        if unresolved_selected_ids:
             raise FileNotFoundError(
-                "Could not resolve renamed test WAV file for work_id "
-                f"{selected_work_id}"
+                "Could not resolve renamed WAV file for selected work_id(s): "
+                f"{unresolved_selected_ids}"
             )
-        target_wav_files = [renamed_wav]
 
     audio_metadata_df = extract_audio_metadata(
         release_folder, target_wav_files=target_wav_files
