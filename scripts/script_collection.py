@@ -68,6 +68,54 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
     return active_dom, output_message
 
 
+def _template_function(active_dom: dict, context_doms: list, getPbFrom: str, **addargs):
+    """
+    template function
+
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param addargs: Addional arguments that are unused
+    """
+    output_message = ""
+
+    root = active_dom["dom"]
+    root: etree.Element = active_dom["dom"]
+    for context_dom in context_doms:
+        if context_dom["notationtype"] == getPbFrom:
+            help_dom = context_dom
+            helproot = help_dom["dom"]
+            break
+    else:
+        raise RuntimeError(
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
+        )
+
+    oldfacs = root.xpath("//mei:facsimile", namespaces=ns)
+
+    if bool(oldfacs):
+        raise RuntimeError(f"{active_dom["filename"]} already has facs")
+
+    facs = helproot.xpath("//mei:facsimile", namespaces=ns)
+
+    if len(facs) == 0:
+        raise RuntimeError(f"{help_dom["filename"]} has no facs")
+
+    newfacs = copy.deepcopy(facs[0])
+    newfacs.attrib.pop("{http://www.w3.org/XML/1998/namespace}id", None)
+    graphics = newfacs.findall(".//mei:graphic", namespaces=ns)
+    for graph in graphics:
+        graph.attrib.pop("{http://www.w3.org/XML/1998/namespace}id", None)
+
+    music = root.find("./mei:music", namespaces=ns)
+
+    music.insert(0, newfacs)
+
+    active_dom["dom"] = root
+    return active_dom, output_message
+
+
 def _template_function(active_dom: dict, context_doms: list, **addargs):
     """
     template function
@@ -154,7 +202,7 @@ def getmnum(root: etree.Element):
 
 
 def add_header_from_dipl_GLT(
-    active_dom: dict, context_doms: list, projectstaff: str, **addargs
+    active_dom: dict, context_doms: list, projectstaff: str, getPbFrom: str, **addargs
 ):
     """
     Adds header from dipl_GLT to ed_GLT, dipl_CMN or ed_CMN
@@ -169,13 +217,17 @@ def add_header_from_dipl_GLT(
 
     output_message = ""
 
+    root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
-        if context_dom["notationtype"] == "dipl_GLT":
-            helproot = context_dom["dom"]
+        if context_dom["notationtype"] == getPbFrom:
+            help_dom = context_dom
+            helproot = help_dom["dom"]
             break
     else:
-        raise RuntimeError("add_header_from_GLT needs context_dom dipl_GLT, not given")
+        raise RuntimeError(
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
+        )
 
     if root.xpath(
         ".//mei:corpName//mei:expan[text()='Electronic Linked Annotated Unified Tablature Edition']",
@@ -196,16 +248,22 @@ def add_header_from_dipl_GLT(
     )
 
     abbr = help_header.find(".//mei:titlePart/mei:abbr", namespaces=ns)
-    if "ed" in active_dom["notationtype"]:
+    if "ed" in active_dom["notationtype"] and "dipl" in help_dom["notationtype"]:
         abbr.getparent().text = "edition in "
-    if "CMN" in active_dom["notationtype"]:
+    elif "CMN" in active_dom["notationtype"] and "GLT" in help_dom["notationtype"]:
         abbr.clear()
         abbr.set("expan", "Common Music Notation")
         abbr.text = "CMN"
+    elif "dipl" in active_dom["notationtype"] and "ed" in help_dom["notationtype"]:
+        abbr.getparent().text = "transcription in "
+    elif "GLT" in active_dom["notationtype"] and "CMN" in help_dom["notationtype"]:
+        abbr.clear()
+        abbr.set("expan", "German Lute Tablature")
+        abbr.text = "GLT"
 
     edition = help_header.find(".//mei:edition", namespaces=ns)
     edition.set("resp", f"#{projectstaff}")
-    edition.text = f"First {'diplomatic transcription' if 'dipl' in active_dom["notationtype"] else 'edition'} in CMN. Lute tuned in A."
+    edition.text = f"First {'diplomatic transcription' if 'dipl' in active_dom["notationtype"] else 'edition'} in {'GLT.' if 'GLT' in active_dom["notationtype"] else 'CMN. Lute tuned in A.'}"
 
     appinfoold = help_header.find(".//mei:appInfo", namespaces=ns)
     encodingDesc = appinfoold.getparent()
@@ -294,7 +352,7 @@ def add_section_foldir_to_ed(
             break
     else:
         raise RuntimeError(
-            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {get_pb_from}, not found"
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
         )
 
     if "ed" in active_dom["notationtype"]:
