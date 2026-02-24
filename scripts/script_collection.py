@@ -313,10 +313,10 @@ def add_section_foldir_to_ed(
     section = root.find(".//mei:section", namespaces=ns)
 
     if "dipl" in help_dom["notationtype"]:
-        section_info = get_section_info_dipl(helproot, help_dom)
+        section_info = get_section_info_dipl(help_dom)
     else:
         if get_last_mnum(root) == get_last_mnum(helproot):
-            section_info = get_section_info_ed(helproot, help_dom)
+            section_info = get_section_info_ed(help_dom)
         else:
             raise RuntimeError(
                 f"{active_dom["filename"]} has diffrent number of measures from {help_dom["filename"]}"
