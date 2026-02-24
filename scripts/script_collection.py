@@ -68,7 +68,9 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
     return active_dom, output_message
 
 
-def add_facs(active_dom: dict, context_doms: list, getElemFrom: str, **addargs):
+def add_facs_from_context(
+    active_dom: dict, context_doms: list, getElemFrom: str, **addargs
+):
     """
     addsbfacs from getPbFroms
 
@@ -76,6 +78,8 @@ def add_facs(active_dom: dict, context_doms: list, getElemFrom: str, **addargs):
     :type active_dom: dict
     :param context_doms: list containing dom dicts
     :type context_doms: list
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :param addargs: Addional arguments that are unused
     """
     output_message = ""
@@ -210,6 +214,8 @@ def add_header_from_context(
     :param active_dom: dict containing {filename:str, notationtype:str, dom:etree.Element}
     :type active_dom: dict
     :param context_doms: list containing dom dicts
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :type context_doms: list
     :param addargs: Addional arguments that are unused
     """
@@ -294,6 +300,9 @@ def get_last_mnum(root: etree.Element):
 
 
 def add_foldir(measure: etree.Element, fol: str, tstamp: str):
+    """
+    Adds subelement dir to measure
+    """
     dir = etree.SubElement(
         measure,
         "dir",
@@ -304,6 +313,12 @@ def add_foldir(measure: etree.Element, fol: str, tstamp: str):
 
 
 def manual_unwrap(element):
+    """
+    Removes Element, adding children to parent
+
+    :param element: etree.Element to be processed
+    :type element: etree.Element
+    """
     parent = element.getparent()
     if parent is None:
         return  # Cannot unwrap the root
@@ -326,7 +341,7 @@ def manual_unwrap(element):
     parent.remove(element)
 
 
-def add_section_foldir_to_ed(
+def add_section_foldir_from_context_to_ed(
     active_dom: dict, context_doms: list, getElemFrom: str, **addargs
 ):
     """
@@ -336,6 +351,8 @@ def add_section_foldir_to_ed(
     :type active_dom: dict
     :param context_doms: list containing dom dicts
     :type context_doms: list
+    :param getElemFrom: string poitning to one notationtype in context_doms
+    :type getElemFrom: str
     :param addargs: Addional arguments that are unused
     """
     output_message = ""
@@ -443,6 +460,9 @@ def add_section_foldir_to_ed(
 
 
 def get_section_info_dipl(help_dom: dict):
+    """
+    Searches for dirs with folio to find mnum of measures after or containing page beginning
+    """
     pb_measures = help_dom["dom"].xpath(".//mei:dir[@type='ref']/..", namespaces=ns)
     print([p.tag for p in pb_measures])
 
@@ -456,7 +476,9 @@ def get_section_info_dipl(help_dom: dict):
             raise RuntimeError(
                 f"foldir parent wasn't measure in {help_dom["filename"]} at {pb_measure.get("n","no_n_found")}"
             )
-        if pb_measure.xpath("ancestor::mei:orig", namespaces=ns):
+        if pb_measure.xpath(
+            "ancestor::mei:orig", namespaces=ns
+        ):  # only look in choice/reg
             continue
         if pb_measure.xpath("ancestor::mei:reg", namespaces=ns):
             pbs = pb_measure.getparent().xpath("./mei:pb", namespaces=ns)
@@ -478,6 +500,7 @@ def get_section_info_dipl(help_dom: dict):
 
 
 def get_section_info_ed(help_dom: dict):
+    """Searches for sections and dirs with folio denoting page peginning"""
     help_sections = help_dom["dom"].xpath("//mei:section[@n]", namespaces=ns)
 
     section_info = []
@@ -493,6 +516,7 @@ def get_section_info_ed(help_dom: dict):
 
 
 def get_previous_at_same_depth(tree, element):
+    """Finds previous sibling independnet of nesting"""
     depth = get_depth(element)
     same_depth = [el for el in tree.iter() if get_depth(el) == depth]
     idx = same_depth.index(element)

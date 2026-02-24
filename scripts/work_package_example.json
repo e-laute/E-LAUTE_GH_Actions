@@ -24,7 +24,7 @@
         "default": "dipl_GLT"
       }
     },
-    "scripts": ["script_collection.add_section_foldir_to_ed"],
+    "scripts": ["script_collection.add_section_foldir_from_context_to_ed"],
     "commitResult": true
   },
   {
@@ -38,7 +38,7 @@
         "default": "dipl_GLT"
       }
     },
-    "scripts": ["script_collection.add_facs"],
+    "scripts": ["script_collection.add_facs_from_context"],
     "commitResult": true
   },
   {
