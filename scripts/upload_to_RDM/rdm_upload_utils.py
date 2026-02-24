@@ -16,9 +16,7 @@ from urllib.parse import quote, urlparse
 
 import pandas as pd
 
-MIN_REQUEST_INTERVAL_SECONDS = float(
-    os.environ.get("RDM_MIN_REQUEST_INTERVAL_SECONDS", "0.35")
-)
+MIN_REQUEST_INTERVAL_SECONDS = 0.85
 _LAST_REQUEST_TS = 0.0
 
 
