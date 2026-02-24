@@ -345,6 +345,7 @@ def add_section_foldir_to_ed(
     section_children = list(section)
     current_n = ""
     current_section = 0
+    print(section_info)
     for child in section_children:
         if child.tag == f"{{{ns['mei']}}}measure":
             current_n = child.get("n", "")
