@@ -176,7 +176,9 @@ def load_selected_upload_files_from_env(error_collector=None):
 
     if not os.path.exists(manifest_path):
         if error_collector is not None:
-            error_collector.append(f"Upload manifest not found: {manifest_path}")
+            error_collector.append(
+                f"Upload manifest not found: {manifest_path}"
+            )
         return []
 
     selected_files = []
@@ -1055,13 +1057,6 @@ def upload_to_rdm(
         )
         _mark_failed()
         return failed_uploads
-    finally:
-        status = "FAILED" if failed_uploads else "SUCCESS"
-        if status == "FAILED":
-            step = failed_step or "unknown"
-            print(f"{elaute_id}: FAILED ({step})")
-        else:
-            print(f"{elaute_id}: SUCCESS")
 
 
 def compare_hashed_files(current_value, new_value):

@@ -13,15 +13,12 @@ def validate_mei_file(file_path, schema, errors):
             content = f.read()
         doc = etree.fromstring(content)
         schema.assertValid(doc)
-        print(f"✅ Validation successful for {file_path}")
     except etree.DocumentInvalid as e:
         error_msg = f"Validation failed for {file_path}: {e}"
         errors.append(error_msg)
-        print(f"❌ {error_msg}")
     except Exception as e:
         error_msg = f"Error processing {file_path}: {e}"
         errors.append(error_msg)
-        print(f"❌ {error_msg}")
 
 
 def find_mei_files(directory):
@@ -38,7 +35,6 @@ def main(directory):
     errors = []
     mei_files = find_mei_files(directory)
     if not mei_files:
-        print("No .mei or .tei files found in the specified directory.")
         return True
 
     for mei_file in mei_files:
@@ -89,28 +85,17 @@ def main(directory):
             errors.append(f"Error parsing {mei_file}: {e}")
             continue
 
-    # Report all errors at the end
     if errors:
-        print("\n" + "=" * 50)
-        print("VALIDATION ERRORS SUMMARY:")
-        print("=" * 50)
-        for error in errors:
-            print(f"❌ {error}")
-        print(f"\nTotal errors found: {len(errors)}")
         return False
     else:
-        print("\n✅ All MEI files validated successfully!")
         return True
 
 
 if __name__ == "__main__":
     directory = os.environ["CALLER_REPO_PATH"]
-    print("Encodings_dir:", directory)
     if not os.path.isdir(directory):
-        print(f"The specified path '{directory}' is not a directory.")
         sys.exit(1)
     success = main(directory)
-    print("MEI validation completed.")
     if not success:
         sys.exit(1)
     sys.exit(0)

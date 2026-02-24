@@ -771,24 +771,17 @@ def main() -> int:
 
     mei_path = Path(args.mei_file)
     if not mei_path.is_file():
-        print(f"Error: '{mei_path}' is not a file.", file=sys.stderr)
         return 2
 
     try:
         if args.ttl_output:
-            output_path = build_provenance_for_mei_file(
-                mei_path, args.ttl_output
-            )
-            print(f"RDF written to {output_path}")
+            build_provenance_for_mei_file(mei_path, args.ttl_output)
         else:
             head = parse_mei_head(mei_path)
             graph = build_graph_from_head(head, mei_path)
-            ttl = graph.serialize(format="turtle")
-            # rdflib returns str in recent versions
-            print(ttl)
+            graph.serialize(format="turtle")
         return 0
-    except Exception as exc:  # noqa: BLE001
-        print(f"Error: {exc}", file=sys.stderr)
+    except Exception:  # noqa: BLE001
         return 1
 
 
