@@ -162,9 +162,7 @@ def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
             failed_id_folders.append(folder_id)
 
     if failed_id_folders:
-        print(
-            "Validation failed for: " + ", ".join(sorted(failed_id_folders))
-        )
+        print("Validation failed for: " + ", ".join(sorted(failed_id_folders)))
         return False
 
     print("Validation OK")
@@ -225,8 +223,7 @@ def run_provenance_on_converted_mei_files(
         if not converted_root.is_dir():
             continue
         converted_mei_files = sorted(
-            path.resolve()
-            for path in converted_root.rglob("*.mei")
+            path.resolve() for path in converted_root.rglob("*.mei")
         )
         for mei_path in converted_mei_files:
             work_id = get_work_id_from_filename(mei_path.name)
@@ -266,8 +263,7 @@ def stage_converted_mei_files_by_id(
         converted_sources = sorted(
             path.resolve()
             for path in converted_root.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in {".mei", ".ttl"}
+            if path.is_file() and path.suffix.lower() in {".mei", ".ttl"}
         )
         staged_files: list[str] = []
         for source_path in converted_sources:
