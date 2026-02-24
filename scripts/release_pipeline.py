@@ -70,10 +70,12 @@ def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
         line = re.sub(r"^[-*]\s*\[[ xX]\]\s*", "", line)
         line = re.sub(r"^[-*]\s*", "", line)
         line = line.strip().strip("`")
+        line = line.replace(r"\_", "_")
         if not line:
             continue
 
         candidate = re.split(r"\s+", line, maxsplit=1)[0]
+        candidate = candidate.replace(r"\_", "_")
         candidate = candidate.strip("`").strip(",;")
         if candidate:
             excluded.add(candidate)
