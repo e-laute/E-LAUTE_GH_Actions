@@ -19,23 +19,25 @@ import pandas as pd
 import os
 import shutil
 import sys
-import tempfile
-import zipfile
 from lxml import etree
-
-import requests
-
-import re
 
 from datetime import datetime
 from pathlib import Path
 
 
 from upload_to_RDM.rdm_upload_utils import (
+    append_unique,
+    rdm_request,
     get_records_from_RDM,
     set_headers,
     parse_rdm_cli_args,
     setup_for_rdm_api_access,
+    get_candidate_upload_files,
+    get_candidate_mei_files_from_uploads,
+    get_work_ids_from_files,
+    get_files_for_work_id,
+    get_upload_files_for_work_id,
+    prepare_upload_file_paths,
     load_sources_table_csv,
     look_up_source_links,
     look_up_source_title,
@@ -274,200 +276,20 @@ def get_metadata_df_from_mei(mei_file_path):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 
-def load_selected_upload_files_from_env():
-    """
-    Load an explicit upload file list from ELAUTE_UPLOAD_FILE_LIST if provided.
-    One absolute file path per line.
-    """
-    manifest_path = os.environ.get("ELAUTE_UPLOAD_FILE_LIST", "").strip()
-    if not manifest_path:
-        return None
-
-    if not os.path.exists(manifest_path):
-        raise FileNotFoundError(f"Upload manifest not found: {manifest_path}")
-
-    selected_files = []
-    with open(manifest_path, "r", encoding="utf-8") as manifest:
-        for raw_line in manifest:
-            line = raw_line.strip()
-            if not line:
-                continue
-            file_path = os.path.abspath(line)
-            if os.path.isfile(file_path):
-                selected_files.append(file_path)
-
-    # Preserve stable order but remove duplicates
-    return list(dict.fromkeys(selected_files))
-
-
-def get_candidate_upload_files():
-    """
-    Return the exact list of files to upload.
-    Priority:
-      1) explicit manifest file list (ELAUTE_UPLOAD_FILE_LIST)
-      2) FILES_PATH scan, optionally restricted to converted folders.
-    Includes MEI and provenance Turtle files.
-    """
+def _get_cached_candidate_upload_files():
     global SELECTED_UPLOAD_FILES
-    if SELECTED_UPLOAD_FILES is not None:
-        return SELECTED_UPLOAD_FILES
-
-    selected_from_manifest = load_selected_upload_files_from_env()
-    if selected_from_manifest is not None:
-        SELECTED_UPLOAD_FILES = [
-            file_path
-            for file_path in selected_from_manifest
-            if file_path.lower().endswith((".mei", ".ttl"))
-        ]
-        return SELECTED_UPLOAD_FILES
-
-    only_converted = os.environ.get("ELAUTE_ONLY_CONVERTED", "0") == "1"
-    files = []
-    for root, dirs, filenames in os.walk(FILES_PATH):
-        for file in filenames:
-            if not file.lower().endswith((".mei", ".ttl")):
-                continue
-            full_path = os.path.abspath(os.path.join(root, file))
-            normalized = full_path.replace("\\", "/")
-            if only_converted and "/converted/" not in normalized:
-                continue
-            files.append(full_path)
-
-    SELECTED_UPLOAD_FILES = list(dict.fromkeys(sorted(files)))
+    SELECTED_UPLOAD_FILES = get_candidate_upload_files(
+        files_path=FILES_PATH,
+        selected_upload_files=SELECTED_UPLOAD_FILES,
+        error_collector=errors,
+    )
     return SELECTED_UPLOAD_FILES
 
 
-def get_candidate_mei_files():
-    """Return only MEI files from current upload candidates."""
-    return [
-        file_path
-        for file_path in get_candidate_upload_files()
-        if file_path.lower().endswith(".mei")
-    ]
-
-
-def prepare_upload_file_paths(work_id, upload_file_paths):
-    """
-    Bundle all .ttl files into one zip archive.
-    """
-    mei_files = sorted(
-        p for p in upload_file_paths if p.lower().endswith(".mei")
+def _get_cached_candidate_mei_files():
+    return get_candidate_mei_files_from_uploads(
+        _get_cached_candidate_upload_files()
     )
-    ttl_files = sorted(
-        p for p in upload_file_paths if p.lower().endswith(".ttl")
-    )
-    if not ttl_files:
-        print(
-            "[INFO] Upload payload prepared "
-            f"for {work_id}: {len(mei_files)} MEI files, no TTL zip"
-        )
-        return list(dict.fromkeys(upload_file_paths)), None
-
-    temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
-    safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
-    zip_path = os.path.join(temp_dir, f"{safe_work_id}_provenance_files.zip")
-
-    with zipfile.ZipFile(
-        zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
-    ) as zip_file:
-        for ttl_path in ttl_files:
-            zip_file.write(ttl_path, arcname=os.path.basename(ttl_path))
-
-    with zipfile.ZipFile(zip_path, mode="r") as zip_file:
-        zipped_entries = zip_file.namelist()
-    if len(zipped_entries) != len(ttl_files):
-        raise ValueError(
-            f"TTL bundling mismatch for {work_id}: expected {len(ttl_files)} entries, "
-            f"got {len(zipped_entries)} in zip."
-        )
-
-    prepared_files = [
-        p for p in upload_file_paths if not p.lower().endswith(".ttl")
-    ]
-    prepared_files = list(dict.fromkeys(prepared_files))
-    prepared_files.append(zip_path)
-    print(
-        "[INFO] Upload payload prepared for "
-        f"{work_id}: {len(mei_files)} MEI + 1 TTL zip ({len(ttl_files)} TTL files)"
-    )
-    return prepared_files, temp_dir
-
-
-def get_full_id_from_filename(file_name: str) -> str:
-    """
-    Return everything before '_enc_' (without extension) if present.
-    """
-    base_name = os.path.splitext(file_name)[0]
-    if "_enc_" in base_name:
-        return base_name.split("_enc_", maxsplit=1)[0]
-    return base_name
-
-
-def get_short_work_id_for_lookup(identifier: str) -> str:
-    """
-    Legacy short work_id used for lookups (e.g. id_table keys): ..._n<digits>.
-    Falls back to the full identifier when no '_n<digits>' part exists.
-    """
-    match = re.match(r"^(.+_n\d+)", identifier)
-    if match:
-        return match.group(1)
-    return identifier
-
-
-def get_work_id_from_filename_for_lookup(file_name: str) -> str:
-    """
-    Derive lookup work_id from filename:
-    1) cut at '_enc_'
-    2) shorten to legacy ..._n<digits> form
-    """
-    full_id = get_full_id_from_filename(file_name)
-    return get_short_work_id_for_lookup(full_id)
-
-
-def get_work_ids_from_files():
-    """
-    Scan all folders in FILES_PATH and extract unique lookup work_ids.
-    Example: Jud_1523-2_n10_18v_enc_dipl_GLT.mei -> Jud_1523-2_n10
-    """
-    work_ids = set()
-
-    for file_path in get_candidate_mei_files():
-        file = os.path.basename(file_path)
-        work_ids.add(get_work_id_from_filename_for_lookup(file))
-
-    return sorted(list(work_ids))
-
-
-def get_files_for_work_id(work_id):
-    """
-    Get all MEI files that belong to a specific work_id.
-    """
-    matching_files = []
-
-    for file_path in get_candidate_mei_files():
-        file = os.path.basename(file_path)
-        file_work_id = get_work_id_from_filename_for_lookup(file)
-
-        if file_work_id == work_id:
-            matching_files.append(file_path)
-
-    return list(dict.fromkeys(sorted(matching_files)))
-
-
-def get_upload_files_for_work_id(work_id):
-    """
-    Get all upload files (MEI + provenance TTL) that belong to a specific work_id.
-    """
-    matching_files = []
-
-    for file_path in get_candidate_upload_files():
-        file = os.path.basename(file_path)
-        file_work_id = get_work_id_from_filename_for_lookup(file)
-
-        if file_work_id == work_id:
-            matching_files.append(file_path)
-
-    return list(dict.fromkeys(sorted(matching_files)))
 
 
 def combine_metadata_for_work_id(work_id, file_paths):
@@ -758,20 +580,20 @@ def update_records_in_RDM(work_ids_to_update):
     """Update existing records in RDM if metadata has changed."""
 
     # HTTP Headers
-    h, fh = set_headers(RDM_API_TOKEN)
+    h, _fh = set_headers(RDM_API_TOKEN)
 
     # Load existing work_id to record_id mapping
     existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
+    if existing_records is None or existing_records.empty:
+        return [], list(dict.fromkeys(work_ids_to_update))
 
     # current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updated_records = []
     failed_updates = []
 
     for work_id in work_ids_to_update:
-        print(f"\n--- Checking for updates: {work_id} ---")
-
         # Check if work_id exists in mapping
         mapping_row = existing_records[existing_records["elaute_id"] == work_id]
         if mapping_row.empty:
@@ -781,13 +603,17 @@ def update_records_in_RDM(work_ids_to_update):
 
         try:
             # Get files for this work_id and combine metadata
-            mei_file_paths = get_files_for_work_id(work_id)
+            mei_file_paths = get_files_for_work_id(
+                work_id, _get_cached_candidate_mei_files()
+            )
             if not mei_file_paths:
-                print(f"No files found for work_id: {work_id}")
+                append_unique(failed_updates, work_id)
                 continue
-            upload_file_paths = get_upload_files_for_work_id(work_id)
+            upload_file_paths = get_upload_files_for_work_id(
+                work_id, _get_cached_candidate_upload_files()
+            )
             if not upload_file_paths:
-                print(f"No upload files found for work_id: {work_id}")
+                append_unique(failed_updates, work_id)
                 continue
 
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
@@ -795,7 +621,7 @@ def update_records_in_RDM(work_ids_to_update):
             )
 
             if metadata_df.empty:
-                print(f"Failed to extract metadata for work_id {work_id}")
+                append_unique(failed_updates, work_id)
                 continue
 
             # Create new metadata structure
@@ -805,12 +631,11 @@ def update_records_in_RDM(work_ids_to_update):
             new_metadata = new_metadata_structure["metadata"]
 
             # Fetch current record metadata from RDM
-            r = requests.get(f"{RDM_API_URL}/records/{record_id}", headers=h)
+            r = rdm_request(
+                "GET", f"{RDM_API_URL}/records/{record_id}", headers=h
+            )
             if r.status_code != 200:
-                print(
-                    f"Failed to fetch record {record_id} (code: {r.status_code})"
-                )
-                failed_updates.append(work_id)
+                append_unique(failed_updates, work_id)
                 continue
 
             current_record = r.json()
@@ -833,7 +658,6 @@ def update_records_in_RDM(work_ids_to_update):
 
             # Check for metadata changes
             metadata_changed = False
-            changes_detected = []
 
             for field in fields_to_compare:
                 current_value = current_metadata.get(field)
@@ -841,14 +665,9 @@ def update_records_in_RDM(work_ids_to_update):
 
                 if not compare_hashed_files(current_value, new_value):
                     metadata_changed = True
-                    changes_detected.append(field)
 
             if not metadata_changed:
                 continue
-
-            print(
-                f"Metadata changes detected for work_id {work_id} in fields: {', '.join(changes_detected)}"
-            )
 
             # --- UPLOAD ---
             new_version_data = r.json()
@@ -868,26 +687,17 @@ def update_records_in_RDM(work_ids_to_update):
                     record_id=new_record_id,
                 )
                 failed_updates.extend(fails)
+                if not fails:
+                    append_unique(updated_records, work_id)
             finally:
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
-        except Exception as e:
-            print(f"Error updating record for work_id {work_id}: {str(e)}")
-            failed_updates.append(work_id)
+        except Exception:
+            append_unique(failed_updates, work_id)
             continue
 
-    # Summary
-    print("\nUPDATE SUMMARY:")
-    print(f"   Records checked: {len(work_ids_to_update)}")
-    print(f"   Failed updates: {len(failed_updates)}")
-
-    if failed_updates:
-        print("\nFailed to update:")
-        for work_id in failed_updates:
-            print(f"   - {work_id}")
-
-    return updated_records, failed_updates
+    return updated_records, list(dict.fromkeys(failed_updates))
 
 
 def process_elaute_ids_for_update_or_create():
@@ -897,16 +707,18 @@ def process_elaute_ids_for_update_or_create():
     """
 
     # Get all work_ids from files that currently are to be uploaded (either created or updated)
-    work_ids = get_work_ids_from_files()
+    work_ids = get_work_ids_from_files(_get_cached_candidate_mei_files())
 
     if not work_ids:
-        print("No work_ids found.")
         return [], []
 
     existing_records = get_records_from_RDM(
         RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID
     )
-    existing_work_ids = set(existing_records["elaute_id"].tolist())
+    if existing_records is None or existing_records.empty:
+        existing_work_ids = set()
+    else:
+        existing_work_ids = set(existing_records["elaute_id"].tolist())
 
     # Get work_ids from current files
     current_work_ids = set(work_ids)
@@ -926,18 +738,19 @@ def upload_mei_files(work_ids):
     failed_uploads = []
 
     if not work_ids:
-        print("No work_ids found.")
-        return
+        return []
 
     for work_id in work_ids:
-        print(f"\n--- Processing work_id: {work_id} ---")
-
         # Get all files for this work_id
-        mei_file_paths = get_files_for_work_id(work_id)
-        upload_file_paths = get_upload_files_for_work_id(work_id)
+        mei_file_paths = get_files_for_work_id(
+            work_id, _get_cached_candidate_mei_files()
+        )
+        upload_file_paths = get_upload_files_for_work_id(
+            work_id, _get_cached_candidate_upload_files()
+        )
 
         if not mei_file_paths or not upload_file_paths:
-            failed_uploads.append(work_id)
+            append_unique(failed_uploads, work_id)
             continue
 
         try:
@@ -947,7 +760,7 @@ def upload_mei_files(work_ids):
             )
 
             if metadata_df.empty:
-                failed_uploads.append(work_id)
+                append_unique(failed_uploads, work_id)
                 continue
 
             # Create RDM metadata
@@ -974,22 +787,9 @@ def upload_mei_files(work_ids):
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
-        except AssertionError as e:
-            print(f"Assertion error processing work_id {work_id}: {str(e)}")
-            failed_uploads.append(work_id)
-        except Exception as e:
-            print(f"Error processing work_id {work_id}: {str(e)}")
-            failed_uploads.append(work_id)
-    # Summary
-    print("\nUPLOAD SUMMARY:")
-    print(f"   Failed uploads: {len(failed_uploads)}")
-
-    if failed_uploads:
-        print("\nFailed to upload:")
-        for failed in failed_uploads:
-            print(f"   - {failed}")
-
-    return failed_uploads
+        except Exception:
+            append_unique(failed_uploads, work_id)
+    return list(dict.fromkeys(failed_uploads))
 
 
 def main() -> int:
@@ -998,39 +798,39 @@ def main() -> int:
     """
 
     # TODO: add check for work_ids and RDM_record_ids via RDM_API and check if update or create
-    testing_mode = parse_rdm_cli_args(
-        description="Upload MEI files to RDM (testing or production)."
-    )
-
-    global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID, SELECTED_UPLOAD_FILES
-    (
-        RDM_API_URL,
-        RDM_API_TOKEN,
-        FILES_PATH,
-        ELAUTE_COMMUNITY_ID,
-    ) = setup_for_rdm_api_access(TESTING_MODE=testing_mode)
-    SELECTED_UPLOAD_FILES = None
-    get_candidate_upload_files()
-
-    new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
-    has_failures = False
-
-    if len(new_work_ids) > 0:
-        failed_uploads = upload_mei_files(new_work_ids)
-        if failed_uploads:
-            has_failures = True
-
-    if len(existing_work_ids) > 0:
-        _updated_records, failed_updates = update_records_in_RDM(
-            existing_work_ids
+    try:
+        testing_mode = parse_rdm_cli_args(
+            description="Upload MEI files to RDM (testing or production)."
         )
-        if failed_updates:
-            has_failures = True
 
-    if len(existing_work_ids) > 0:
-        print("\nPlease submit for review again on the RDM platform.")
+        global RDM_API_URL, RDM_API_TOKEN, FILES_PATH, ELAUTE_COMMUNITY_ID, SELECTED_UPLOAD_FILES
+        (
+            RDM_API_URL,
+            RDM_API_TOKEN,
+            FILES_PATH,
+            ELAUTE_COMMUNITY_ID,
+        ) = setup_for_rdm_api_access(TESTING_MODE=testing_mode)
+        SELECTED_UPLOAD_FILES = None
+        _get_cached_candidate_upload_files()
 
-    return 1 if has_failures else 0
+        new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
+        has_failures = False
+
+        if len(new_work_ids) > 0:
+            failed_uploads = upload_mei_files(new_work_ids)
+            if failed_uploads:
+                has_failures = True
+
+        if len(existing_work_ids) > 0:
+            _updated_records, failed_updates = update_records_in_RDM(
+                existing_work_ids
+            )
+            if failed_updates:
+                has_failures = True
+
+        return 1 if has_failures else 0
+    except Exception:
+        return 1
 
 
 if __name__ == "__main__":

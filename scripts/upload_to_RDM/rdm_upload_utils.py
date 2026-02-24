@@ -8,6 +8,9 @@ import json
 import hashlib
 import argparse
 import time
+import tempfile
+import zipfile
+import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -155,6 +158,179 @@ def parse_rdm_cli_args(description):
         testing_mode = True
 
     return testing_mode
+
+
+def append_unique(items, value):
+    if value not in items:
+        items.append(value)
+
+
+def load_selected_upload_files_from_env(error_collector=None):
+    """
+    Load an explicit upload file list from ELAUTE_UPLOAD_FILE_LIST if provided.
+    One absolute file path per line.
+    """
+    manifest_path = os.environ.get("ELAUTE_UPLOAD_FILE_LIST", "").strip()
+    if not manifest_path:
+        return None
+
+    if not os.path.exists(manifest_path):
+        if error_collector is not None:
+            error_collector.append(f"Upload manifest not found: {manifest_path}")
+        return []
+
+    selected_files = []
+    with open(manifest_path, "r", encoding="utf-8") as manifest:
+        for raw_line in manifest:
+            line = raw_line.strip()
+            if not line:
+                continue
+            file_path = os.path.abspath(line)
+            if os.path.isfile(file_path):
+                selected_files.append(file_path)
+
+    return list(dict.fromkeys(selected_files))
+
+
+def get_candidate_upload_files(
+    files_path, selected_upload_files=None, error_collector=None
+):
+    """
+    Return the exact list of files to upload.
+    Priority:
+      1) explicit manifest file list (ELAUTE_UPLOAD_FILE_LIST)
+      2) files_path scan, optionally restricted to converted folders.
+    Includes MEI and provenance Turtle files.
+    """
+    if selected_upload_files is not None:
+        return selected_upload_files
+
+    selected_from_manifest = load_selected_upload_files_from_env(
+        error_collector=error_collector
+    )
+    if selected_from_manifest is not None:
+        return [
+            file_path
+            for file_path in selected_from_manifest
+            if file_path.lower().endswith((".mei", ".ttl"))
+        ]
+
+    only_converted = os.environ.get("ELAUTE_ONLY_CONVERTED", "0") == "1"
+    files = []
+    for root, _dirs, filenames in os.walk(files_path):
+        for file in filenames:
+            if not file.lower().endswith((".mei", ".ttl")):
+                continue
+            full_path = os.path.abspath(os.path.join(root, file))
+            normalized = full_path.replace("\\", "/")
+            if only_converted and "/converted/" not in normalized:
+                continue
+            files.append(full_path)
+
+    return list(dict.fromkeys(sorted(files)))
+
+
+def get_candidate_mei_files_from_uploads(candidate_upload_files):
+    return [
+        file_path
+        for file_path in candidate_upload_files
+        if file_path.lower().endswith(".mei")
+    ]
+
+
+def get_full_id_from_filename(file_name: str) -> str:
+    """
+    Return everything before '_enc_' (without extension) if present.
+    """
+    base_name = os.path.splitext(file_name)[0]
+    if "_enc_" in base_name:
+        return base_name.split("_enc_", maxsplit=1)[0]
+    return base_name
+
+
+def get_short_work_id_for_lookup(identifier: str) -> str:
+    """
+    Legacy short work_id used for lookups (e.g. id_table keys): ..._n<digits>.
+    Falls back to the full identifier when no '_n<digits>' part exists.
+    """
+    match = re.match(r"^(.+_n\d+)", identifier)
+    if match:
+        return match.group(1)
+    return identifier
+
+
+def get_work_id_from_filename_for_lookup(file_name: str) -> str:
+    """
+    Derive lookup work_id from filename:
+    1) cut at '_enc_'
+    2) shorten to legacy ..._n<digits> form
+    """
+    full_id = get_full_id_from_filename(file_name)
+    return get_short_work_id_for_lookup(full_id)
+
+
+def get_work_ids_from_files(candidate_mei_files):
+    work_ids = set()
+    for file_path in candidate_mei_files:
+        file = os.path.basename(file_path)
+        work_ids.add(get_work_id_from_filename_for_lookup(file))
+    return sorted(list(work_ids))
+
+
+def get_files_for_work_id(work_id, candidate_mei_files):
+    matching_files = []
+    for file_path in candidate_mei_files:
+        file = os.path.basename(file_path)
+        file_work_id = get_work_id_from_filename_for_lookup(file)
+        if file_work_id == work_id:
+            matching_files.append(file_path)
+    return list(dict.fromkeys(sorted(matching_files)))
+
+
+def get_upload_files_for_work_id(work_id, candidate_upload_files):
+    matching_files = []
+    for file_path in candidate_upload_files:
+        file = os.path.basename(file_path)
+        file_work_id = get_work_id_from_filename_for_lookup(file)
+        if file_work_id == work_id:
+            matching_files.append(file_path)
+    return list(dict.fromkeys(sorted(matching_files)))
+
+
+def prepare_upload_file_paths(work_id, upload_file_paths):
+    """
+    Bundle all .ttl files into one zip archive.
+    """
+    ttl_files = sorted(
+        p for p in upload_file_paths if p.lower().endswith(".ttl")
+    )
+    if not ttl_files:
+        return list(dict.fromkeys(upload_file_paths)), None
+
+    temp_dir = tempfile.mkdtemp(prefix="elaute_ttl_bundle_")
+    safe_work_id = re.sub(r"[^A-Za-z0-9._-]+", "_", work_id)
+    zip_path = os.path.join(temp_dir, f"{safe_work_id}_provenance_files.zip")
+
+    with zipfile.ZipFile(
+        zip_path, mode="w", compression=zipfile.ZIP_DEFLATED
+    ) as zip_file:
+        for ttl_path in ttl_files:
+            zip_file.write(ttl_path, arcname=os.path.basename(ttl_path))
+
+    with zipfile.ZipFile(zip_path, mode="r") as zip_file:
+        zipped_entries = zip_file.namelist()
+    if len(zipped_entries) != len(ttl_files):
+        raise ValueError(
+            f"TTL bundling mismatch for {work_id}: expected {len(ttl_files)} entries, "
+            f"got {len(zipped_entries)} in zip."
+        )
+
+    prepared_files = [
+        p for p in upload_file_paths if not p.lower().endswith(".ttl")
+    ]
+    prepared_files = list(dict.fromkeys(prepared_files))
+    prepared_files.append(zip_path)
+    return prepared_files, temp_dir
 
 
 # Utility: make HTML link
