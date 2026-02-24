@@ -588,6 +588,7 @@ def add_finis_to_last_measure(
     measure = root.xpath("//mei:measure", namespaces=ns)[-1]
     layer = measure.find(".//mei:layer", namespaces=ns)
     tstamp = dur_length(layer)
+    print(tstamp)
     if meterSig is not None:
         tstamp = tstamp * int(meterSig.get("unit", "4"))
     else:
@@ -600,6 +601,8 @@ def add_finis_to_last_measure(
             raise RuntimeError(
                 f"Measure {measure.get("n","n_not_found")} has problematic tstamp calculation"
             )
+
+    print(tstamp)
     vu = str(
         round(guess_string_width(finisText) * 2.5) + 5
     )  # vu to whitespace ca. 2.5 for wordlength + 5 as spacing
@@ -608,7 +611,7 @@ def add_finis_to_last_measure(
         "dir",
         {
             "staff": "2" if "ed_CMN" in active_dom["notationtype"] else "1",
-            "tstamp": str(tstamp),
+            "tstamp": str(tstamp + 1),
             "place": "above" if "ed_CMN" in active_dom["notationtype"] else "within",
             "type": "finis",
             "ho": vu + "vu",
