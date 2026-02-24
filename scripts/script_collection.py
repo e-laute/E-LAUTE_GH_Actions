@@ -407,14 +407,15 @@ def add_section_foldir_to_ed(
 
     section_children = list(section)
     current_n = ""
-    current_section = 0
+    current_section = -1  # current section statrs before 0 to account for first section
     print(section_info)
     for child in section_children:
         if child.tag == f"{{{ns['mei']}}}measure":
             current_n = child.get("n", "")
             if (
                 current_section != len(section_info) - 1
-                and current_n == section_info[current_section + 1][0]
+                and current_n
+                == section_info[current_section + 1][0]  # compare to next section mnum
             ):
                 current_section += 1
                 section_info[current_section][3].append(child)
@@ -424,7 +425,7 @@ def add_section_foldir_to_ed(
                     section_info[current_section][2],
                 )
             else:
-                section_info[current_section][3].append(child)
+                section_info[current_section][3].append(child)  # sh
         else:
             section_info[current_section][3].append(child)
 
