@@ -360,7 +360,6 @@ def add_section_foldir_from_context_to_ed(
     if "ed" not in active_dom["notationtype"]:
         raise RuntimeError(f"{active_dom['filename']} must be ed_GLT or ed_CMN")
 
-    root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
         if context_dom["notationtype"] == getElemFrom:
@@ -521,3 +520,102 @@ def get_previous_at_same_depth(tree, element):
     same_depth = [el for el in tree.iter() if get_depth(el) == depth]
     idx = same_depth.index(element)
     return same_depth[idx - 1] if idx > 0 else None
+
+
+def guess_string_width(text):
+    """width of ascii letters as arbitary heuristic"""
+    if not text:
+        return 0
+
+    # Split by lines and find the longest one (visual width-wise)
+    lines = text.splitlines()
+
+    # Character weight map based on a typical sans-serif font
+    # Normalized so that a standard lowercase letter or space is ~1.0
+    weights = {
+        "wide": "MWm@W",  # Weight: 1.5
+        "narrow": "ilj|!:.tI[]",  # Weight: 0.4
+        "caps": "ABCDEFGHJKLNPQRSTUVXYZ",  # Weight: 1.2
+    }
+
+    def get_line_width(line):
+        """nested function to compute line width with heuristic"""
+        width = 0.0
+        for char in line:
+            if char in weights["wide"]:
+                width += 1.5
+            elif char in weights["narrow"]:
+                width += 0.4
+            elif char.isupper():
+                width += 1.2
+            elif char == "\t":
+                width += 4.0  # Standard 4-space tab
+            else:
+                width += 1.0  # Default for lowercase, numbers, and spaces
+        return width
+
+    return max(get_line_width(line) for line in lines)
+
+
+def add_finis_to_last_measure(
+    active_dom: dict, context_doms: list, finisText: str, **addargs
+):
+    """
+    adds finis on the last tstamp+1 of the last measure, doesnt account for mark-up or n-tuplets
+    :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
+    :type active_dom: dict
+    :param context_doms: list containing dom dicts
+    :type context_doms: list
+    :param finisText: finis text
+    :type finisText: str
+    :param addargs: Addional arguments that are unused
+    """
+    output_message = ""
+
+    if finisText == "":
+        output_message = "No finis added because none given"
+        return active_dom, output_message
+
+    root = active_dom["dom"]
+
+    meterSig = root.find(".//mei:meterSig", namespaces=ns)
+
+    # remove before adding again
+    finis = root.xpath("//mei:dir[@type='finis']", namespaces=ns)
+    if finis:
+        raise RuntimeError("Finis already there")
+
+    measure = root.xpath("//mei:measure", namespaces=ns)[-1]
+    layer = measure.find(".//mei:layer", namespaces=ns)
+    tstamp = dur_length(layer)
+    if meterSig is not None:
+        tstamp = tstamp * int(meterSig.get("unit", "4"))
+    else:
+        tstamp *= 4
+        for _ in range(10):
+            if tstamp.is_integer():
+                break
+            tstamp *= 2
+        else:
+            raise RuntimeError(
+                f"Measure {measure.get("n","n_not_found")} has problematic tstamp calculation"
+            )
+    vu = str(
+        round(guess_string_width(finisText) * 2.5) + 5
+    )  # vu to whitespace ca. 2.5 for wordlength + 5 as spacing
+    dir = etree.SubElement(
+        measure,
+        "dir",
+        {
+            "staff": "2" if "ed_CMN" in active_dom["notationtype"] else "1",
+            "tstamp": str(tstamp),
+            "place": "above" if "ed_CMN" in active_dom["notationtype"] else "within",
+            "type": "finis",
+            "ho": vu + "vu",
+        },
+    )
+    rend = etree.SubElement(dir, "rend", {"halign": "right"})
+    rend.text = finisText
+
+    active_dom["dom"] = root
+    return active_dom, output_message
