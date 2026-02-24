@@ -108,14 +108,12 @@ if __name__ == "__main__":
                 continue
             if exclude in exclude_files:
                 continue
-            print(root / filepath)
+            print(f"Wrapper calls coordinator.main with{root / filepath}")
             try:
                 coordinator.main(
                     workpackage_id=args.workpackage_id,
-                    filepath=root / filepath,
+                    filepath=str((root / filepath)),
                     addargs=args.addargs,
                 )
             except Exception as e:
-                write_to_github_summary(
-                    f"\n{filepath} wasn't processed due to coordinator raising {e}\n"
-                )
+                print(f"\n{filepath} wasn't processed due to coordinator raising {e}\n")

@@ -100,7 +100,7 @@ def get_context_doms(filepath: Path):
 
     directory = filepath.parent
     extension = ".mei"
-
+    print(f"Directory of context doms {directory}")
     # 2. Find files with the same extension, excluding the original file, call wrapper
     other_files = [
         parse_and_wrap_dom(f)[0]
@@ -149,6 +149,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     """
     Parses Arguments, selects file, calls coordinator on files with workpackage
     """
+    print("We are in coodinator.main!")
     # TODO misses -nt --notationtype, -e --exclude
     # For now assumes python coordinator.py filepath workpackage additional arguments
     # TODO check for validity of workpackage x filetype, multiple files
@@ -165,7 +166,10 @@ def main(workpackage_id: str, filepath: str, addargs: list):
 
     dic_add_args = check_addargs_against_json(parse_addargs(addargs), workpackage)
     # hardcode 'caller-repo/' prefix to refer to caller (source) repository
-    mei_path = Path("caller-repo", filepath)
+    if filepath.startswith("caller-repo"):
+        mei_path = Path(filepath)
+    else:
+        mei_path = Path("caller-repo", filepath)
     # mei_path = Path(filepath)
     print(f"Checking file: {mei_path}")
     if not mei_path.is_file():
