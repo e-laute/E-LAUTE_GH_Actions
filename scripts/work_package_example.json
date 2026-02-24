@@ -14,6 +14,20 @@
     "commitResult": true
   },
   {
+    "id": "add_section_and_foldir_to_ed",
+    "label": "Add section for page beginnings and doirs with folio number to ed",
+    "description": "takes help_dom as context_dom and finds position of page beginnigs, adds them to ed_GLT or ed_CMN",
+    "userFacing": true,
+    "params": {
+      "getPbFrom": {
+        "type": "String",
+        "default": "dipl_GLT"
+      }
+    },
+    "scripts": ["script_collection.add_section_foldir_to_ed"],
+    "commitResult": true
+  },
+  {
     "id": "error_run",
     "label": "create_runtime_error",
     "description": "Calls add_sbs_every_n and then runtime_error",

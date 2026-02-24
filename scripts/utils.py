@@ -77,6 +77,10 @@ def edit_appInfo(root: etree.Element, p_description: str):
     return root
 
 
+def get_depth(element):
+    return sum(1 for _ in element.iterancestors())
+
+
 def dur_length(elem: etree.Element, ignore=["sic", "orig"]):
     """Recursively adds up all `@dur` in subtree while accounting for `@dots`.
 
