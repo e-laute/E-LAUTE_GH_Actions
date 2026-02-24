@@ -768,8 +768,18 @@ def update_records_in_RDM(work_ids_to_update):
                 work_id, _get_cached_candidate_mei_files()
             )
             if not mei_file_paths:
-                append_unique(failed_updates, work_id)
-                _emit_work_status(work_id, False, "UPDATE", "missing-mei-files")
+                if FORCE_METADATA_ONLY_UPDATE:
+                    _emit_work_status(
+                        work_id,
+                        True,
+                        "UPDATE",
+                        "skipped-missing-input-files",
+                    )
+                else:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id, False, "UPDATE", "missing-mei-files"
+                    )
                 continue
             upload_file_paths = []
             if not FORCE_METADATA_ONLY_UPDATE:
