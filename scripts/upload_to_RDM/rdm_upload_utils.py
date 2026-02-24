@@ -7,16 +7,97 @@ import os
 import json
 import hashlib
 import argparse
+import time
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import pandas as pd
 
+MIN_REQUEST_INTERVAL_SECONDS = float(
+    os.environ.get("RDM_MIN_REQUEST_INTERVAL_SECONDS", "0.35")
+)
+_LAST_REQUEST_TS = 0.0
+
+
+def _wait_for_request_slot():
+    """
+    Enforce a minimum spacing between API requests.
+    """
+    global _LAST_REQUEST_TS
+    if MIN_REQUEST_INTERVAL_SECONDS <= 0:
+        _LAST_REQUEST_TS = time.monotonic()
+        return
+
+    now = time.monotonic()
+    elapsed = now - _LAST_REQUEST_TS
+    if elapsed < MIN_REQUEST_INTERVAL_SECONDS:
+        time.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+    _LAST_REQUEST_TS = time.monotonic()
+
+
+def _parse_retry_after_seconds(retry_after_header):
+    """
+    Parse Retry-After header value as seconds when possible.
+    """
+    if not retry_after_header:
+        return None
+    try:
+        parsed = int(str(retry_after_header).strip())
+        return max(parsed, 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def rdm_request(
+    method,
+    url,
+    *,
+    allow_retry=False,
+    max_attempts=3,
+    retry_statuses=(429, 500, 502, 503, 504),
+    **kwargs,
+):
+    """
+    Centralized API request wrapper with request pacing.
+    Retries are disabled by default to avoid duplicate non-idempotent requests.
+    """
+    attempts = max_attempts if allow_retry else 1
+    attempts = max(1, attempts)
+
+    for attempt in range(1, attempts + 1):
+        _wait_for_request_slot()
+        response = requests.request(method, url, **kwargs)
+
+        if (
+            allow_retry
+            and attempt < attempts
+            and response.status_code in retry_statuses
+        ):
+            retry_after = _parse_retry_after_seconds(
+                response.headers.get("Retry-After")
+            )
+            backoff_seconds = retry_after
+            if backoff_seconds is None:
+                backoff_seconds = min(2 ** (attempt - 1), 8)
+            print(
+                "[WARN] Rate/server limit encountered "
+                f"({response.status_code}) on {method} {url}; "
+                f"waiting {backoff_seconds}s before retry {attempt + 1}/{attempts}."
+            )
+            time.sleep(backoff_seconds)
+            continue
+
+        return response
+
+    raise RuntimeError(
+        f"Request failed after retries: {method} {url}"
+    )  # defensive fallback
+
 
 def get_id_from_api(url):
     """Get community ID from API URL with error handling"""
     try:
-        response = requests.get(url, timeout=30)
+        response = rdm_request("GET", url, timeout=30)
         response.raise_for_status()
         return response.json().get("id")
     except requests.exceptions.RequestException as e:
@@ -239,41 +320,55 @@ def get_records_from_RDM(RDM_API_TOKEN, RDM_API_URL, ELAUTE_COMMUNITY_ID):
     Fetch records from the RDM API.
     """
     h, _fh = set_headers(RDM_API_TOKEN)
-    response = requests.get(
-        f"{RDM_API_URL}/communities/{ELAUTE_COMMUNITY_ID}/records",
-        headers=h,
-    )
-
-    if not response.status_code == 200:
-        print(f"Error fetching records from RDM: {response.status_code}")
-        return None
-
     records = []
-    hits = response.json().get("hits", {}).get("hits", [])
-    for hit in hits:
-        record_id = hit.get("id")
-        parent_id = hit.get("parent", {}).get("id")
-        file_count = hit.get("files", {}).get("count")
-        created = hit.get("created")
-        updated = hit.get("updated")
-        # Try to extract elaute_id from identifiers (other)
-        elaute_id = None
-        metadata = hit.get("metadata", {})
-        identifiers = metadata.get("identifiers")
-        for ident in identifiers or []:
-            if ident.get("scheme") == "other":
-                elaute_id = ident.get("identifier")
-                break
-        records.append(
-            {
-                "elaute_id": elaute_id,
-                "record_id": record_id,
-                "parent_id": parent_id,
-                "file_count": file_count,
-                "created": created,
-                "updated": updated,
-            }
-        )
+    next_url = f"{RDM_API_URL}/communities/{ELAUTE_COMMUNITY_ID}/records"
+    visited_urls = set()
+
+    while next_url:
+        if next_url in visited_urls:
+            print(
+                "Detected repeated pagination URL while fetching RDM records. "
+                "Stopping to avoid an infinite loop."
+            )
+            break
+        visited_urls.add(next_url)
+
+        response = rdm_request("GET", next_url, headers=h, timeout=60)
+        if response.status_code != 200:
+            print(
+                "Error fetching records from RDM: "
+                f"{response.status_code} (url: {next_url})"
+            )
+            return None
+
+        payload = response.json()
+        hits = payload.get("hits", {}).get("hits", [])
+        for hit in hits:
+            record_id = hit.get("id")
+            parent_id = hit.get("parent", {}).get("id")
+            file_count = hit.get("files", {}).get("count")
+            created = hit.get("created")
+            updated = hit.get("updated")
+            # Try to extract elaute_id from identifiers (other)
+            elaute_id = None
+            metadata = hit.get("metadata", {})
+            identifiers = metadata.get("identifiers")
+            for ident in identifiers or []:
+                if ident.get("scheme") == "other":
+                    elaute_id = ident.get("identifier")
+                    break
+            records.append(
+                {
+                    "elaute_id": elaute_id,
+                    "record_id": record_id,
+                    "parent_id": parent_id,
+                    "file_count": file_count,
+                    "created": created,
+                    "updated": updated,
+                }
+            )
+
+        next_url = payload.get("links", {}).get("next")
     return pd.DataFrame(records)
 
 
@@ -324,7 +419,8 @@ def _metadata_changed_for_update(
 
 def _get_remote_file_info(record_id, headers, api_url):
     try:
-        response = requests.get(
+        response = rdm_request(
+            "GET",
             f"{api_url}/records/{record_id}/files", headers=headers
         )
         if response.status_code != 200:
@@ -414,7 +510,8 @@ def _upload_initialized_files(
             raise AssertionError(f"Missing upload/commit links for {filename}.")
 
         with file_path.open("rb") as fp:
-            response = requests.put(
+            response = rdm_request(
+                "PUT",
                 links["content"],
                 data=fp,
                 headers=file_headers,
@@ -424,13 +521,7 @@ def _upload_initialized_files(
             f"(code: {response.status_code})"
         )
 
-        response = requests.post(links["commit"], headers=headers)
-        if response.status_code != 200:
-            print(
-                f"[WARN] Commit failed for {filename} "
-                f"(code: {response.status_code}); retrying once."
-            )
-            response = requests.post(links["commit"], headers=headers)
+        response = rdm_request("POST", links["commit"], headers=headers)
         assert response.status_code == 200, (
             f"Failed to commit file {filename} (code: {response.status_code}) "
             f"response: {response.text[:300]}"
@@ -451,7 +542,8 @@ def _sync_draft_files_with_local(
     - delete removed files from draft
     - re-upload only new/changed files
     """
-    response = requests.post(
+    response = rdm_request(
+        "POST",
         f"{api_url}/records/{record_id}/draft/actions/files-import",
         headers=headers,
     )
@@ -461,7 +553,8 @@ def _sync_draft_files_with_local(
         f"response: {response.text[:300]}"
     )
 
-    response = requests.get(
+    response = rdm_request(
+        "GET",
         f"{api_url}/records/{record_id}/draft/files", headers=headers
     )
     assert response.status_code == 200, (
@@ -479,7 +572,8 @@ def _sync_draft_files_with_local(
     # Remove files that are no longer present locally.
     for filename in sorted(draft_names - local_names):
         encoded_filename = quote(filename, safe="")
-        response = requests.delete(
+        response = rdm_request(
+            "DELETE",
             f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
             headers=headers,
         )
@@ -502,7 +596,8 @@ def _sync_draft_files_with_local(
             remote_checksum, local_checksum
         ):
             encoded_filename = quote(filename, safe="")
-            response = requests.delete(
+            response = rdm_request(
+                "DELETE",
                 f"{api_url}/records/{record_id}/draft/files/{encoded_filename}",
                 headers=headers,
             )
@@ -514,7 +609,8 @@ def _sync_draft_files_with_local(
 
     if files_to_upload:
         file_entries = [{"key": path.name} for path in files_to_upload]
-        response = requests.post(
+        response = rdm_request(
+            "POST",
             links["files"],
             data=json.dumps(file_entries),
             headers=headers,
@@ -566,7 +662,7 @@ def upload_to_rdm(
             "rights",
         ]
 
-        r = requests.get(f"{RDM_API_URL}/records/{record_id}", headers=h)
+        r = rdm_request("GET", f"{RDM_API_URL}/records/{record_id}", headers=h)
         if r.status_code != 200:
             print(f"Failed to fetch record {record_id} (code: {r.status_code})")
             failed_uploads.append(elaute_id)
@@ -600,7 +696,8 @@ def upload_to_rdm(
 
         if files_changed:
             # File changes require a new version draft.
-            r = requests.post(
+            r = rdm_request(
+                "POST",
                 f"{RDM_API_URL}/records/{record_id}/versions",
                 headers=h,
             )
@@ -619,7 +716,8 @@ def upload_to_rdm(
             record_id = new_record_id
 
             # Explicitly enter draft edit mode for the new version draft.
-            r = requests.post(
+            r = rdm_request(
+                "POST",
                 f"{RDM_API_URL}/records/{record_id}/draft",
                 headers=h,
             )
@@ -632,7 +730,8 @@ def upload_to_rdm(
                 return failed_uploads
         else:
             # Metadata-only updates edit the currently published record draft.
-            r = requests.post(
+            r = rdm_request(
+                "POST",
                 f"{RDM_API_URL}/records/{record_id}/draft",
                 headers=h,
             )
@@ -644,7 +743,8 @@ def upload_to_rdm(
                 failed_uploads.append(elaute_id)
                 return failed_uploads
 
-        r = requests.put(
+        r = rdm_request(
+            "PUT",
             f"{RDM_API_URL}/records/{record_id}/draft",
             data=json.dumps(metadata),
             headers=h,
@@ -670,7 +770,8 @@ def upload_to_rdm(
             )
     else:
         # Create new draft record
-        r = requests.post(
+        r = rdm_request(
+            "POST",
             records_api_url,
             data=json.dumps(metadata),
             headers=h,
@@ -683,7 +784,8 @@ def upload_to_rdm(
         # Keep current per-file initialization behavior for new records.
         for file_path in local_file_paths:
             filename = file_path.name
-            r = requests.post(
+            r = rdm_request(
+                "POST",
                 links["files"],
                 data=json.dumps([{"key": filename}]),
                 headers=h,
@@ -701,7 +803,8 @@ def upload_to_rdm(
 
     if new_upload:
         # Set community review request first.
-        r = requests.put(
+        r = rdm_request(
+            "PUT",
             f"{records_api_url}/{record_id}/draft/review",
             headers=h,
             data=json.dumps(
@@ -721,7 +824,8 @@ def upload_to_rdm(
             return failed_uploads
 
         # Create curation request for the record.
-        r = requests.post(
+        r = rdm_request(
+            "POST",
             f"{RDM_API_URL}/curations",
             headers=h,
             data=json.dumps({"topic": {"record": record_id}}),
@@ -736,7 +840,8 @@ def upload_to_rdm(
             return failed_uploads
 
         # Submit community review request.
-        r = requests.post(
+        r = rdm_request(
+            "POST",
             f"{records_api_url}/{record_id}/draft/actions/submit-review",
             headers=h,
         )
@@ -757,7 +862,8 @@ def upload_to_rdm(
         # Publish update workflow:
         # - metadata-only: edit draft -> update metadata -> publish
         # - file changes: create version -> update metadata/files -> publish -> submit-review
-        r = requests.post(
+        r = rdm_request(
+            "POST",
             f"{records_api_url}/{record_id}/draft/actions/publish",
             headers=h,
         )
@@ -771,7 +877,8 @@ def upload_to_rdm(
             return failed_uploads
 
         if files_changed:
-            r = requests.post(
+            r = rdm_request(
+                "POST",
                 f"{records_api_url}/{record_id}/draft/actions/submit-review",
                 headers=h,
             )
