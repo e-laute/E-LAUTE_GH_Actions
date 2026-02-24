@@ -310,7 +310,10 @@ def add_section_foldir_to_ed(
                 f"{active_dom["filename"]} contains recursive section but no expansion"
             )
 
-    section = root.find(".//mei:section", namespaces=ns)
+    sections = root.xpath(".//mei:section", namespaces=ns)
+
+    if len(sections) != 1:
+        raise RuntimeError(f"{active_dom["filename"]} number of section is not 1")
 
     if "dipl" in help_dom["notationtype"]:
         section_info = get_section_info_dipl(help_dom)
