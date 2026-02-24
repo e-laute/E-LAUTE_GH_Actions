@@ -68,9 +68,9 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
     return active_dom, output_message
 
 
-def _template_function(active_dom: dict, context_doms: list, getPbFrom: str, **addargs):
+def add_facs(active_dom: dict, context_doms: list, getElemFrom: str, **addargs):
     """
-    template function
+    addsbfacs from getPbFroms
 
     :param active_dom: dict containing {filename:Path/str?, notationtype:str, dom:etree.Element}
     :type active_dom: dict
@@ -83,13 +83,13 @@ def _template_function(active_dom: dict, context_doms: list, getPbFrom: str, **a
     root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
-        if context_dom["notationtype"] == getPbFrom:
+        if context_dom["notationtype"] == getElemFrom:
             help_dom = context_dom
             helproot = help_dom["dom"]
             break
     else:
         raise RuntimeError(
-            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getElemFrom}, not found"
         )
 
     oldfacs = root.xpath("//mei:facsimile", namespaces=ns)
@@ -201,8 +201,8 @@ def getmnum(root: etree.Element):
     )
 
 
-def add_header_from_dipl_GLT(
-    active_dom: dict, context_doms: list, projectstaff: str, getPbFrom: str, **addargs
+def add_header_from_context(
+    active_dom: dict, context_doms: list, projectstaff: str, getElemFrom: str, **addargs
 ):
     """
     Adds header from dipl_GLT to ed_GLT, dipl_CMN or ed_CMN
@@ -220,13 +220,13 @@ def add_header_from_dipl_GLT(
     root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
-        if context_dom["notationtype"] == getPbFrom:
+        if context_dom["notationtype"] == getElemFrom:
             help_dom = context_dom
             helproot = help_dom["dom"]
             break
     else:
         raise RuntimeError(
-            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getElemFrom}, not found"
         )
 
     if root.xpath(
@@ -327,7 +327,7 @@ def manual_unwrap(element):
 
 
 def add_section_foldir_to_ed(
-    active_dom: dict, context_doms: list, getPbFrom: str, **addargs
+    active_dom: dict, context_doms: list, getElemFrom: str, **addargs
 ):
     """
     Removes expansion and section containing sections, adds foldir and sections/pbs based on dipl or ed
@@ -346,13 +346,13 @@ def add_section_foldir_to_ed(
     root = active_dom["dom"]
     root: etree.Element = active_dom["dom"]
     for context_dom in context_doms:
-        if context_dom["notationtype"] == getPbFrom:
+        if context_dom["notationtype"] == getElemFrom:
             help_dom = context_dom
             helproot = help_dom["dom"]
             break
     else:
         raise RuntimeError(
-            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getPbFrom}, not found"
+            f"add_section_foldir_from_dipl_GLT_to_ed needs context_dom {getElemFrom}, not found"
         )
 
     if "ed" in active_dom["notationtype"]:

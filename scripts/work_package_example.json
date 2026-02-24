@@ -15,16 +15,30 @@
   },
   {
     "id": "add_section_and_foldir_to_ed",
-    "label": "Add section for page beginnings and doirs with folio number to ed",
+    "label": "Add section and dirs with folio to ed from getElemFrom",
     "description": "takes help_dom as context_dom and finds position of page beginnigs, adds them to ed_GLT or ed_CMN",
     "userFacing": true,
     "params": {
-      "getPbFrom": {
+      "getElemFrom": {
         "type": "String",
         "default": "dipl_GLT"
       }
     },
     "scripts": ["script_collection.add_section_foldir_to_ed"],
+    "commitResult": true
+  },
+  {
+    "id": "add_facs",
+    "label": "Add facsimile from getElemFrom",
+    "description": "takes help_dom as context_dom and finds position of page beginnigs, adds them to ed_GLT or ed_CMN",
+    "userFacing": true,
+    "params": {
+      "getElemFrom": {
+        "type": "String",
+        "default": "dipl_GLT"
+      }
+    },
+    "scripts": ["script_collection.add_facs"],
     "commitResult": true
   },
   {
@@ -64,19 +78,19 @@
   },
   {
     "id": "add_header_from_GLT",
-    "label": "Add Header from dipl_GLT",
+    "label": "Add Header from getElemFrom",
     "description": "Adds header from dipl GLT with needed adjustments for all other filetypes",
     "userFacing": true,
     "params": {
       "projectstaff": {
         "type": "String"
       },
-      "role": {
+      "getElemFrom": {
         "type": "String",
-        "default": "typesetter"
+        "default": "dipl_GLT"
       }
     },
-    "scripts": ["script_collection.add_header_from_dipl_GLT"],
+    "scripts": ["script_collection.add_header_from_context"],
     "commitResult": true
   },
   {
