@@ -267,7 +267,7 @@ if __name__ == "__main__":
     parser = initialize_parser()
     args = parser.parse_args()
     sys.exit(
-        main(
+        _messages=main(
             workpackage_id=args.workpackage_id,
             filepath=args.filepath,
             addargs=args.addargs,
