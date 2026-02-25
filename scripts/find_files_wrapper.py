@@ -86,6 +86,8 @@ def initialize_parser():
 
 
 def root_filter(root: Path):
+    if "converted" in root:
+        return True
     return False
 
 
@@ -102,10 +104,11 @@ if __name__ == "__main__":
     error_message = ""
 
     root = Path("caller-repo")
-    for root, _, filepaths in root.walk():
+    for root, dirs, filepaths in root.walk():
+        dirs.sort()
         if root_filter(root):
             continue
-        for filepath in filepaths:
+        for filepath in sorted(filepaths):
             filetype, exclude = get_file_info(filepath)
             if filetype is None or exclude is None:
                 continue
