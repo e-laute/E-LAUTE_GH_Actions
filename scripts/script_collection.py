@@ -186,13 +186,14 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     explainer = f"""The table shows all notationtypes found in the directory of {id_name} or fnf for (file not found)
 The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
 """
-    content = "\t".join(
+    content = "✅ " if mnums_align else "❌ "
+    content += "\t".join(
         [
             "|".join(s.rjust(3) for s in f) if isinstance(f, tuple) else f
             for f in output_list
         ]
     )
-    content = "✅ " if mnums_align else "❌ " + content
+
     output_message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + content
 
     write_to_github_summary(content + "\n")
