@@ -45,6 +45,8 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
     except ImportError as e:
         raise NameError("Unknown module") from e
     output_message_total = ""
+    summary_message = ""
+    error_message = ""
     for script in scripts_list:
         module_path, _dot, func_name = script.rpartition(".")
         current_func = getattr(modules_dic[module_path], func_name, None)
@@ -52,10 +54,11 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
             raise AttributeError(f"Unknown script or wrong module path: {script}")
         # scripts take active_dom:dict, context_dom:list[dict], params:dict
         try:
-            active_dom, output_message_current = current_func(
+            active_dom, output_message_current, summary_message_current = current_func(
                 active_dom, context_doms, **params
             )
             output_message_total += f"Script {func_name} was succesful{", says:\n"+output_message_current if output_message_current else "."}\n\n"
+            summary_message += summary_message_current
         except TypeError as e:
             # "...missing 1 required positional argument: 'x'" -> params was missing key
             if "missing" in str(e):
@@ -74,8 +77,9 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
                 + output_message_total
                 + f"Script {func_name} failed, says:\n{e}\n\nNo further scripts executed and no files changed"
             )
+            error_message = f"Script {func_name} failed on {filepath}, says:\n{e}\n\nNo further scripts executed and no files changed"
             write_to_console(output_message_total)
-            return 1
+            return summary_message, error_message
 
     if workpackage["commitResult"]:
         edit_appInfo(active_dom["dom"], workpackage["label"])
@@ -86,7 +90,7 @@ def execute_workpackage(filepath: Path, workpackage: dict, params: dict):
         + output_message_total
     )
     write_to_console(output_message_total)
-    return 0
+    return summary_message, error_message
 
 
 def get_context_doms(filepath: Path):
@@ -177,9 +181,11 @@ def main(workpackage_id: str, filepath: str, addargs: list):
         return 2
 
     # try:
-    execute_workpackage(mei_path, workpackage, dic_add_args)
+    summary_message, error_message = execute_workpackage(
+        mei_path, workpackage, dic_add_args
+    )
     print("::notice::Process completed successfully")
-    return 0
+    return summary_message, error_message
     # except Exception as e:
     #   print(f"::error::Failed to process file: {e}")
     #  return 1

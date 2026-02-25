@@ -16,6 +16,8 @@ FILETYPE_CHOICES = [
     "ed_GLT",
 ]
 
+SUMMARY_HEADER_TABLE = "| Ok? | file_id | dipl_GLT | dipl_CMN | ed_GLT | ed_CMN |\n| --- | --- | --- | --- | --- |"
+
 EXCLUDE_ERROR_MESSAGE = "Must all be numbers greater than 0"
 
 
@@ -96,6 +98,9 @@ if __name__ == "__main__":
     except ValueError:
         parser.error(EXCLUDE_ERROR_MESSAGE)
 
+    summary_message = ""
+    error_message = ""
+
     root = Path("caller-repo")
     for root, _, filepaths in root.walk():
         if root_filter(root):
@@ -110,10 +115,16 @@ if __name__ == "__main__":
                 continue
             print(f"Wrapper calls coordinator.main with{root / filepath}")
             try:
-                coordinator.main(
+                summary_message_current, error_message_current = coordinator.main(
                     workpackage_id=args.workpackage_id,
                     filepath=str((root / filepath)),
                     addargs=args.addargs,
                 )
+                summary_message += summary_message_current
+                error_message += error_message_current
             except Exception as e:
                 print(f"\n{filepath} wasn't processed due to coordinator raising {e}\n")
+
+    write_to_github_summary(
+        SUMMARY_HEADER_TABLE + summary_message + "\n\nErrors:\n" + error_message
+    )

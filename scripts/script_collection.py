@@ -41,7 +41,9 @@ def add_sbs_every_n(active_dom: dict, context_doms: list, sbInterval: int, **add
 
     active_dom["dom"] = root
     output_message = ""
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
@@ -65,7 +67,9 @@ def remove_all_sbs(active_dom: dict, context_doms: list, **addargs):
 
     active_dom["dom"] = root
     output_message = ""
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def add_facs_from_context(
@@ -117,7 +121,9 @@ def add_facs_from_context(
     music.insert(0, newfacs)
 
     active_dom["dom"] = root
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def _template_function(active_dom: dict, context_doms: list, **addargs):
@@ -137,7 +143,9 @@ def _template_function(active_dom: dict, context_doms: list, **addargs):
     xpath_result = root.xpath(".//mei:elem[@attrib='value']", namespaces=ns)
 
     active_dom["dom"] = root
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def compare_mnums(active_dom: dict, context_doms: list, **addargs):
@@ -182,23 +190,33 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
         and ed_GLT[1] == ed_CMN[1]
         and ed_GLT[2] == ed_CMN[2]  # ed should have same number of corrected measure
     )
-    output_list = [id_name, dipl_GLT, dipl_CMN, ed_GLT, ed_CMN]
+    correct = "✅ " if mnums_align else "❌ "
+    output_list = [correct, id_name, dipl_GLT, dipl_CMN, ed_GLT, ed_CMN]
     explainer = f"""The table shows all notationtypes found in the directory of {id_name} or fnf for (file not found)
 The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
 """
-    content = "✅ " if mnums_align else "❌ "
-    content += "\t".join(
+
+    output_content = "\t".join(
         [
             "|".join(s.rjust(3) for s in f) if isinstance(f, tuple) else f
             for f in output_list
         ]
     )
 
-    output_message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + content
+    message_content = " | ".join(
+        [
+            "; ".join(s.rjust(3) for s in f) if isinstance(f, tuple) else f
+            for f in output_list
+        ]
+    )
 
-    write_to_github_summary(content + "\n")
+    output_message = (
+        explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + output_content
+    )
 
-    return active_dom, output_message
+    summary_message = "| " + message_content + " |\n"
+
+    return active_dom, output_message, summary_message
 
 
 def getmnum(root: etree.Element):
@@ -298,7 +316,9 @@ def add_header_from_context(
     root.insert(0, help_header)
 
     active_dom["dom"] = root
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def get_last_mnum(root: etree.Element):
@@ -465,7 +485,9 @@ def add_section_foldir_from_context_to_ed(
     score.remove(section)
 
     active_dom["dom"] = root
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
 
 
 def get_section_info_dipl(help_dom: dict):
@@ -631,4 +653,6 @@ def add_finis_to_last_measure(
     rend.text = finisText
 
     active_dom["dom"] = root
-    return active_dom, output_message
+    summary_message = ""
+
+    return active_dom, output_message, summary_message
