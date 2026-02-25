@@ -86,7 +86,7 @@ def initialize_parser():
 
 
 def root_filter(root: Path):
-    if "converted" in root:
+    if "converted" in str(root):
         return True
     return False
 
