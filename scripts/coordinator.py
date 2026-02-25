@@ -177,8 +177,7 @@ def main(workpackage_id: str, filepath: str, addargs: list):
     # mei_path = Path(filepath)
     print(f"Checking file: {mei_path}")
     if not mei_path.is_file():
-        print(f"::error::File not found: '{mei_path}'")
-        return 2
+        raise FileNotFoundError(f"::error::File not found: '{mei_path}'")
 
     # try:
     summary_message, error_message = execute_workpackage(
@@ -266,10 +265,9 @@ def initialize_parser():
 if __name__ == "__main__":
     parser = initialize_parser()
     args = parser.parse_args()
-    sys.exit(
-        _messages=main(
-            workpackage_id=args.workpackage_id,
-            filepath=args.filepath,
-            addargs=args.addargs,
-        )
+    main(
+        workpackage_id=args.workpackage_id,
+        filepath=args.filepath,
+        addargs=args.addargs,
     )
+    sys.exit(0)
