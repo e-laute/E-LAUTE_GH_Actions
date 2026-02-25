@@ -151,9 +151,9 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     :param addargs: Addional arguments that are unused
     """
 
-    dipl_glt = "fnf"
+    dipl_GLT = "fnf"
     dipl_CMN = "fnf"
-    ed_glt = "fnf"
+    ed_GLT = "fnf"
     ed_CMN = "fnf"
 
     doms = [active_dom] + context_doms
@@ -161,11 +161,11 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
     for dom in doms:
         match dom["notationtype"]:
             case "dipl_GLT":
-                dipl_glt = getmnum(dom["dom"])[:2]
+                dipl_GLT = getmnum(dom["dom"])[:2]
             case "dipl_CMN":
                 dipl_CMN = getmnum(dom["dom"])[:2]
             case "ed_GLT":
-                ed_glt = getmnum(dom["dom"])
+                ed_GLT = getmnum(dom["dom"])
             case "ed_CMN":
                 ed_CMN = getmnum(dom["dom"])
 
@@ -176,13 +176,20 @@ def compare_mnums(active_dom: dict, context_doms: list, **addargs):
         id_name = id_match.group(1)
     else:
         id_name = active_dom["filename"]
-    output_list = [id_name, dipl_glt, dipl_CMN, ed_glt, ed_CMN]
+    mnums_align = (
+        dipl_GLT[0] == dipl_CMN[0] == ed_GLT[0] == ed_CMN[0]  # last @n must be the same
+        and dipl_GLT[1] == dipl_CMN[1]  # dipland ed should have same number of measures
+        and ed_GLT[1] == ed_CMN[1]
+        and ed_GLT[2] == ed_CMN[2]  # ed should have same number of corrected measure
+    )
+    output_list = [id_name, dipl_GLT, dipl_CMN, ed_GLT, ed_CMN]
     explainer = f"""The table shows all notationtypes found in the directory of {id_name} or fnf for (file not found)
 The individual cells show the @n of the last measure, the number of measure elements and a hereustic for measure number.
 """
     content = "\t".join(
         ["|".join(f) if isinstance(f, tuple) else f for f in output_list]
     )
+    content = "✅ " if mnums_align else "❌ " + content
     output_message = explainer + "File\tdi_GLT\tdi_CMN\ted_GLT\ted_CMN\n" + content
 
     write_to_github_summary(content + "\n")
@@ -194,14 +201,13 @@ def getmnum(root: etree.Element):
     """returns @n of last measure"""
 
     measures = root.xpath("//mei:measure", namespaces=ns)
-    measures_invis = root.xpath("//mei:measure[@right='invis']", namespaces=ns)
     endings = root.xpath("//mei:ending", namespaces=ns)
     has_pickup = measures[0].get("type", "no") == "pickup"
 
     return (
         measures[-1].get("n", "no_n"),
         str(len(measures)),
-        str(len(measures) - int(len(endings) / 2) - has_pickup - len(measures_invis)),
+        str(len(measures) - int(len(endings) / 2) - has_pickup),
     )
 
 
