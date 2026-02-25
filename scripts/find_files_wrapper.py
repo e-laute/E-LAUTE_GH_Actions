@@ -16,7 +16,7 @@ FILETYPE_CHOICES = [
     "ed_GLT",
 ]
 
-SUMMARY_HEADER_TABLE = "| Ok? | file_id | dipl_GLT | dipl_CMN | ed_GLT | ed_CMN |\n| --- | --- | --- | --- | --- |"
+SUMMARY_HEADER_TABLE = "| Ok? | file_id | dipl_GLT | dipl_CMN | ed_GLT | ed_CMN |\n| --- | --- | --- | --- | --- | --- |\n"
 
 EXCLUDE_ERROR_MESSAGE = "Must all be numbers greater than 0"
 
