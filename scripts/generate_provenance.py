@@ -16,6 +16,7 @@ If --ttl is omitted, Turtle is written to stdout.
 import sys
 import argparse
 import re
+from urllib.parse import quote
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -79,9 +80,9 @@ def _strip_ns(tag: str) -> str:
 def _clean_uri(text: str) -> str:
     if not text:
         return ""
-    cleaned = re.sub(r"[^\w\s-]", "", text)
-    cleaned = re.sub(r"\s+", "_", cleaned.strip())
-    return cleaned.lower()
+    cleaned = re.sub(r"\s+", "_", text.strip().lower())
+    # Preserve characters like square brackets by percent-encoding them.
+    return quote(cleaned, safe="._~-")
 
 
 def _extract_text(elem: ET.Element) -> str:
@@ -771,24 +772,17 @@ def main() -> int:
 
     mei_path = Path(args.mei_file)
     if not mei_path.is_file():
-        print(f"Error: '{mei_path}' is not a file.", file=sys.stderr)
         return 2
 
     try:
         if args.ttl_output:
-            output_path = build_provenance_for_mei_file(
-                mei_path, args.ttl_output
-            )
-            print(f"RDF written to {output_path}")
+            build_provenance_for_mei_file(mei_path, args.ttl_output)
         else:
             head = parse_mei_head(mei_path)
             graph = build_graph_from_head(head, mei_path)
-            ttl = graph.serialize(format="turtle")
-            # rdflib returns str in recent versions
-            print(ttl)
+            graph.serialize(format="turtle")
         return 0
-    except Exception as exc:  # noqa: BLE001
-        print(f"Error: {exc}", file=sys.stderr)
+    except Exception:  # noqa: BLE001
         return 1
 
 

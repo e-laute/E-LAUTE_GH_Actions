@@ -97,9 +97,6 @@ def ensure_application_info(
     app_name_node = ET.SubElement(application, f"{ns}name")
     app_name_node.text = app_name
 
-    # Helpful debug info to verify the written application name.
-    print(f"Application name written: {app_name}")
-
     # Add conversion information
     p_from = ET.SubElement(application, f"{ns}p")
     p_from.text = f"Input file: {input_filename}"
@@ -204,8 +201,7 @@ def process_mei_file(input_file, output_dir):
         )
         inject_xml_model_declaration(tree, output_italian)
         return True
-    except Exception as e:
-        print(f"Error processing {input_file}: {str(e)}")
+    except Exception:
         return False
 
 
@@ -254,7 +250,7 @@ def process_directory_recursively(folder_path):
                     )
                     shutil.copy(file_path, glt_target)
                 else:
-                    print(f"Failed to process {file_path}")
+                    continue
 
             elif file.endswith("CMN.mei"):
                 try:
@@ -262,8 +258,8 @@ def process_directory_recursively(folder_path):
                         cmn_dir, file_path, seen_cmn_targets
                     )
                     shutil.copy(file_path, cmn_target)
-                except Exception as e:
-                    print(f"Failed to copy {file_path}: {str(e)}")
+                except Exception:
+                    continue
 
 
 def main():
@@ -290,10 +286,8 @@ def main():
         target_path = os.path.abspath(target_path)
 
     if not os.path.isdir(target_path):
-        print(f"Error: Target folder not found: {target_path}")
         return
 
-    print(f"Processing folder: {target_path}")
     process_directory_recursively(target_path)
 
 

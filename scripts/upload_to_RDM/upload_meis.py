@@ -16,9 +16,11 @@ python -m upload_to_RDM.upload_meis --production
 """
 
 import pandas as pd
+import json
 import os
 import shutil
 import sys
+import traceback
 from lxml import etree
 
 from datetime import datetime
@@ -35,6 +37,7 @@ from upload_to_RDM.rdm_upload_utils import (
     get_candidate_upload_files,
     get_candidate_mei_files_from_uploads,
     get_work_ids_from_files,
+    get_short_work_id_for_lookup,
     get_files_for_work_id,
     get_upload_files_for_work_id,
     prepare_upload_file_paths,
@@ -52,6 +55,7 @@ RDM_API_TOKEN = None
 FILES_PATH = None
 ELAUTE_COMMUNITY_ID = None
 SELECTED_UPLOAD_FILES = None
+FORCE_METADATA_ONLY_UPDATE = True
 
 
 errors = []
@@ -63,6 +67,118 @@ sources_table_path = os.environ.get(
 )
 sources_table = load_sources_table_csv(sources_table_path)
 
+id_table_path = os.environ.get(
+    "ELAUTE_ID_TABLE_PATH",
+    str(Path(__file__).resolve().parent / "tables" / "id_table.csv"),
+)
+
+
+def _load_id_table_title_map(id_csv_path):
+    csv_path = Path(id_csv_path)
+    if not csv_path.exists():
+        return {}
+
+    raw_df = pd.read_csv(csv_path, dtype="string")
+    work_col = "work_id" if "work_id" in raw_df.columns else "IDs"
+    title_col = "title" if "title" in raw_df.columns else "Title"
+    if work_col not in raw_df.columns or title_col not in raw_df.columns:
+        return {}
+
+    table = raw_df[[work_col, title_col]].copy()
+    table[work_col] = table[work_col].astype("string").str.strip()
+    table[title_col] = table[title_col].astype("string").str.strip()
+    table = table.dropna(subset=[work_col, title_col])
+    table = table[table[title_col] != ""]
+
+    title_map = {}
+    for _, row in table.iterrows():
+        work_id = str(row[work_col]).strip()
+        title = str(row[title_col]).strip()
+        if not work_id or not title:
+            continue
+        short_work_id = get_short_work_id_for_lookup(work_id)
+        if short_work_id and short_work_id not in title_map:
+            title_map[short_work_id] = title
+    return title_map
+
+
+ID_TABLE_TITLE_BY_WORK_ID = _load_id_table_title_map(id_table_path)
+
+
+def _emit_work_status(work_id, success, mode, detail=None):
+    status = "SUCCESS" if success else "FAILED"
+    message = f"{work_id}: {status} {mode}"
+    if detail:
+        message = f"{message} ({detail})"
+    print(message)
+
+
+def _format_exception_detail(exc):
+    exc_type = type(exc).__name__
+    exc_text = str(exc).strip()
+    if exc_text:
+        return f"{exc_type}: {exc_text[:300]}"
+    return exc_type
+
+
+def _as_text(value, default=""):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    return str(value)
+
+
+def _emit_exception_debug(work_id, mode, exc, context=None):
+    print(
+        f"{work_id}: DEBUG {mode} exception detail: "
+        f"{_format_exception_detail(exc)}"
+    )
+    if context:
+        print(f"{work_id}: DEBUG {mode} context: {context}")
+    print(f"{work_id}: DEBUG {mode} traceback:\n{traceback.format_exc()}")
+
+
+def _resolve_title_from_row(row):
+    """
+    Resolve a robust, non-empty title from available metadata fields.
+    Preserves square brackets and all original characters.
+    """
+    work_id = _as_text(row.get("work_id")).strip()
+    short_work_id = get_short_work_id_for_lookup(work_id) if work_id else ""
+    id_table_title = (
+        _as_text(ID_TABLE_TITLE_BY_WORK_ID.get(short_work_id)).strip()
+        if short_work_id
+        else ""
+    )
+
+    candidates = [
+        id_table_title,
+        _as_text(row.get("title")).strip(),
+        _as_text(row.get("original_title")).strip(),
+        _as_text(row.get("normalized_title")).strip(),
+        _as_text(row.get("book_title")).strip(),
+    ]
+
+    source_id = _as_text(row.get("source_id")).strip()
+    source_title = (
+        _as_text(look_up_source_title(sources_table, source_id)).strip()
+        if source_id
+        else ""
+    )
+    candidates.append(source_title)
+
+    if work_id:
+        candidates.append(work_id)
+
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return ""
+
 
 def get_metadata_df_from_mei(mei_file_path):
     try:
@@ -72,17 +188,27 @@ def get_metadata_df_from_mei(mei_file_path):
         doc = etree.fromstring(content)
 
         def safe_element_text(element):
-            return (
-                element.text.strip()
-                if element is not None and element.text is not None
-                else ""
-            )
+            if element is None:
+                return ""
+            # Collect nested text too (e.g. <title><supplied>...</supplied></title>)
+            # so editorial markup does not hide title content.
+            text = "".join(element.itertext())
+            return text.strip() if text else ""
 
         # Define namespace for MEI
         ns = {"mei": "http://www.music-encoding.org/ns/mei"}
 
-        # Extract basic metadata
-        metadata = {}
+        # Extract basic metadata. Initialize required keys so lookups
+        # never fail later, and preserve arbitrary string content
+        # (including square brackets) unchanged.
+        metadata = {
+            "work_id": "",
+            "title": "",
+            "source_id": "",
+            "fol_or_p": "",
+            "shelfmark": "",
+            "publication_date": "",
+        }
 
         # Extract work ID from identifier - try multiple locations
         identifier_elem = doc.find(".//mei:identifier", ns)
@@ -105,7 +231,7 @@ def get_metadata_df_from_mei(mei_file_path):
             metadata["title"] = main_title_text
 
         # Try work title if main title not found
-        if "title" not in metadata:
+        if not metadata.get("title"):
             work_title = doc.find(".//mei:work/mei:title", ns)
             work_title_text = safe_element_text(work_title)
             if work_title_text:
@@ -127,7 +253,7 @@ def get_metadata_df_from_mei(mei_file_path):
             metadata["publication_date"] = pub_date.get("isodate")
 
         # Extract folio/page information if not already extracted
-        if "fol_or_p" not in metadata:
+        if not metadata.get("fol_or_p"):
             biblscope = doc.find(".//mei:biblScope", ns)
             biblscope_text = safe_element_text(biblscope)
             if biblscope_text:
@@ -143,7 +269,7 @@ def get_metadata_df_from_mei(mei_file_path):
                 metadata["source_id"] = work_id_text.rsplit("_", 1)[0]
 
         # Validate source ID after all extraction attempts
-        if "source_id" not in metadata:
+        if not metadata.get("source_id"):
             errors.append(f"No source ID found in MEI file {mei_file_path}")
 
         shelfmark = doc.find(".//mei:monogr/mei:identifier", ns)
@@ -155,6 +281,16 @@ def get_metadata_df_from_mei(mei_file_path):
         book_title_text = safe_element_text(book_title)
         if book_title_text:
             metadata["book_title"] = book_title_text
+
+        # Final title fallback chain for robustness.
+        if not metadata.get("title"):
+            metadata["title"] = (
+                metadata.get("original_title")
+                or metadata.get("normalized_title")
+                or metadata.get("book_title")
+                or metadata.get("work_id")
+                or ""
+            )
 
         # Extract license information
         license_elem = doc.find(".//mei:useRestrict/mei:ref", ns)
@@ -385,22 +521,32 @@ def combine_metadata_for_work_id(work_id, file_paths):
     return pd.DataFrame([combined_metadata]), all_people, all_corporate
 
 
-def create_description_for_work(row, file_count):
+def create_description_for_work(row, file_count, resolved_title=None):
     """
     Create description for a work with multiple files.
     """
-    links = look_up_source_links(sources_table, row["source_id"])
+    source_id = _as_text(row.get("source_id"))
+    work_id = _as_text(row.get("work_id"))
+    title = (
+        _as_text(resolved_title)
+        if resolved_title
+        else _resolve_title_from_row(row)
+    )
+    fol_or_p = _as_text(row.get("fol_or_p"))
+    shelfmark = _as_text(row.get("shelfmark"))
+    source_title = _as_text(look_up_source_title(sources_table, source_id))
+
+    links = look_up_source_links(sources_table, source_id)
     links_stringified = (
         ", ".join(make_html_link(link) for link in links) if links else ""
     )
 
-    source_id = row["source_id"]
-    work_number = row["work_id"].split("_")[-1]
+    work_number = work_id.split("_")[-1] if work_id else ""
     platform_link = make_html_link(
         f"https://edition.onb.ac.at/fedora/objects/o:lau.{source_id}/methods/sdef:TEI/get?mode={work_number}"
     )
 
-    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{row['title']}\", a 16th-century lute piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{row['title']}\" and the id \"{row['work_id']}\" in the e-lautedb. It is found on the page(s) or folio(s) {row['fol_or_p']} in the source \"{look_up_source_title(sources_table, row['source_id'])}\" with the E-LAUTE source-id \"{row['source_id']}\" and the shelfmark {row['shelfmark']}.</p>"
+    part1 = f"<h1>Transcriptions in MEI of a lute piece from the E-LAUTE project</h1><h2>Overview</h2><p>This dataset contains transcription files of the piece \"{title}\", a 16th-century lute piece originally notated in lute tablature, created as part of the E-LAUTE project ({make_html_link('https://e-laute.info/')}). The transcriptions preserve and make historical lute music from the German-speaking regions during 1450-1550 accessible.</p><p>They are based on the work with the title \"{title}\" and the id \"{work_id}\" in the e-lautedb. It is found on the page(s) or folio(s) {fol_or_p} in the source \"{source_title}\" with the E-LAUTE source-id \"{source_id}\" and the shelfmark {shelfmark}.</p>"
 
     part4 = f"<p>Images of the original source and renderings of the transcriptions can be found on the E-LAUTE platform: {platform_link}.</p>"
 
@@ -409,7 +555,7 @@ def create_description_for_work(row, file_count):
     else:
         part2 = ""
 
-    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation) as well as a provenance file in Turtle format for each of the MEI files.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
+    part3 = f'<h2>Dataset Contents</h2><p>This dataset includes {file_count} MEI files (.mei) with different transcription variants (diplomatic/editorial versions in various tablature notations and common music notation) as well as a provenance file in Turtle format (.ttl) for each of the MEI files.</p><p>MEI ({make_html_link("https://music-encoding.org/")}) is an XML-based format for encoding and exchanging structured music notation and related editorial information. Turtle files are a plain-text RDF serialization that represents linked-data statements as triples (subject-predicate-object). Both MEI and Turtle files are text-based and can be opened with any standard text editor.</p><h2>About the E-LAUTE Project</h2><p><strong>E-LAUTE: Electronic Linked Annotated Unified Tablature Edition - The Lute in the German-Speaking Area 1450-1550</strong></p><p>The E-LAUTE project creates innovative digital editions of lute tablatures from the German-speaking area between 1450 and 1550. This interdisciplinary "open knowledge platform" combines musicology, music practice, music informatics, and literary studies to transform traditional editions into collaborative research spaces.</p><p>For more information, visit the project website: {make_html_link('https://e-laute.info/')}</p>'
 
     return part1 + part4 + part2 + part3
 
@@ -421,24 +567,26 @@ def fill_out_basic_metadata_for_work(
     Fill out metadata for RDM upload for a work with multiple files.
     """
     row = metadata_row.iloc[0]
+    work_id = _as_text(row.get("work_id"))
+    title = _resolve_title_from_row(row)
+    publication_date = _as_text(
+        row.get("publication_date"), datetime.today().strftime("%Y-%m-%d")
+    )
 
     metadata = {
         "files": {"enabled": True},
         "metadata": {
-            "title": f'{row["title"]} ({row["work_id"]}) MEI Transcriptions',
+            "title": f"{title} ({work_id}) MEI Transcriptions",
             "creators": [],
             "contributors": [],
-            "description": create_description_for_work(row, file_count),
-            "identifiers": [
-                {"identifier": f"{row['work_id']}", "scheme": "other"}
-            ],
+            "description": create_description_for_work(
+                row, file_count, resolved_title=title
+            ),
+            "identifiers": [{"identifier": work_id, "scheme": "other"}],
             "publication_date": datetime.today().strftime("%Y-%m-%d"),
             "dates": [
                 {
-                    "date": row.get(
-                        "publication_date",
-                        datetime.today().strftime("%Y-%m-%d"),
-                    ),
+                    "date": publication_date,
                     "description": "Creation date",
                     "type": {"id": "created", "title": {"en": "Created"}},
                 }
@@ -465,6 +613,16 @@ def fill_out_basic_metadata_for_work(
                         "en": "Creative Commons Attribution Share Alike 4.0 International"
                     },
                 }
+            ],
+            "subjects": [
+                {
+                    "id": "http://www.oecd.org/science/inno/38235147.pdf?6.4",
+                    "scheme": "FOS",
+                    "subject": "Arts (arts, history of arts, performing arts, music)",
+                },
+                {"subject": "lute music"},
+                {"subject": "MEI"},
+                {"subject": "TTL"},
             ],
         },
     }
@@ -567,7 +725,9 @@ def fill_out_basic_metadata_for_work(
                 contributor_names.add(person_role_key)
 
     # Add source links as related identifiers
-    links_to_source = look_up_source_links(sources_table, row["source_id"])
+    links_to_source = look_up_source_links(
+        sources_table, _as_text(row.get("source_id"))
+    )
     if links_to_source:
         metadata["metadata"]["related_identifiers"].extend(
             create_related_identifiers(links_to_source)
@@ -597,6 +757,7 @@ def update_records_in_RDM(work_ids_to_update):
         # Check if work_id exists in mapping
         mapping_row = existing_records[existing_records["elaute_id"] == work_id]
         if mapping_row.empty:
+            _emit_work_status(work_id, False, "UPDATE", "missing-record-map")
             continue
 
         record_id = mapping_row.iloc[0]["record_id"]
@@ -607,14 +768,30 @@ def update_records_in_RDM(work_ids_to_update):
                 work_id, _get_cached_candidate_mei_files()
             )
             if not mei_file_paths:
-                append_unique(failed_updates, work_id)
+                if FORCE_METADATA_ONLY_UPDATE:
+                    _emit_work_status(
+                        work_id,
+                        True,
+                        "UPDATE",
+                        "skipped-missing-input-files",
+                    )
+                else:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id, False, "UPDATE", "missing-mei-files"
+                    )
                 continue
-            upload_file_paths = get_upload_files_for_work_id(
-                work_id, _get_cached_candidate_upload_files()
-            )
-            if not upload_file_paths:
-                append_unique(failed_updates, work_id)
-                continue
+            upload_file_paths = []
+            if not FORCE_METADATA_ONLY_UPDATE:
+                upload_file_paths = get_upload_files_for_work_id(
+                    work_id, _get_cached_candidate_upload_files()
+                )
+                if not upload_file_paths:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id, False, "UPDATE", "missing-upload-files"
+                    )
+                    continue
 
             metadata_df, people_df, corporate_df = combine_metadata_for_work_id(
                 work_id, mei_file_paths
@@ -622,12 +799,34 @@ def update_records_in_RDM(work_ids_to_update):
 
             if metadata_df.empty:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(
+                    work_id, False, "UPDATE", "metadata-extraction"
+                )
                 continue
 
             # Create new metadata structure
-            new_metadata_structure = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(mei_file_paths)
-            )
+            try:
+                new_metadata_structure = fill_out_basic_metadata_for_work(
+                    metadata_df, people_df, corporate_df, len(mei_file_paths)
+                )
+            except KeyError as exc:
+                append_unique(failed_updates, work_id)
+                _emit_work_status(
+                    work_id,
+                    False,
+                    "UPDATE",
+                    f"metadata-key-missing: {_format_exception_detail(exc)}",
+                )
+                _emit_exception_debug(
+                    work_id,
+                    "UPDATE",
+                    exc,
+                    context={
+                        "metadata_columns": list(metadata_df.columns),
+                        "mei_files": mei_file_paths,
+                    },
+                )
+                continue
             new_metadata = new_metadata_structure["metadata"]
 
             # Fetch current record metadata from RDM
@@ -636,6 +835,7 @@ def update_records_in_RDM(work_ids_to_update):
             )
             if r.status_code != 200:
                 append_unique(failed_updates, work_id)
+                _emit_work_status(work_id, False, "UPDATE", "fetch-record")
                 continue
 
             current_record = r.json()
@@ -667,34 +867,101 @@ def update_records_in_RDM(work_ids_to_update):
                     metadata_changed = True
 
             if not metadata_changed:
+                _emit_work_status(work_id, True, "UPDATE", "no-changes")
                 continue
 
-            # --- UPLOAD ---
-            new_version_data = r.json()
-            new_record_id = new_version_data["id"]
-
-            prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
-                work_id, upload_file_paths
-            )
-            try:
-                fails = upload_to_rdm(
-                    metadata=new_metadata_structure,
-                    elaute_id=work_id,
-                    file_paths=prepared_file_paths,
-                    RDM_API_TOKEN=RDM_API_TOKEN,
-                    RDM_API_URL=RDM_API_URL,
-                    ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
-                    record_id=new_record_id,
+            # --- UPDATE ---
+            if FORCE_METADATA_ONLY_UPDATE:
+                draft_response = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    headers=h,
                 )
-                failed_updates.extend(fails)
-                if not fails:
-                    append_unique(updated_records, work_id)
-            finally:
-                if temp_bundle_dir:
-                    shutil.rmtree(temp_bundle_dir, ignore_errors=True)
+                if draft_response.status_code not in (200, 201):
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "open-draft-for-metadata-update",
+                    )
+                    continue
 
-        except Exception:
+                update_response = rdm_request(
+                    "PUT",
+                    f"{RDM_API_URL}/records/{record_id}/draft",
+                    data=json.dumps(new_metadata_structure),
+                    headers=h,
+                )
+                if update_response.status_code != 200:
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "update-draft-metadata",
+                    )
+                    continue
+
+                publish_response = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+                    headers=h,
+                )
+                if publish_response.status_code not in (200, 201, 202):
+                    append_unique(failed_updates, work_id)
+                    _emit_work_status(
+                        work_id,
+                        False,
+                        "UPDATE",
+                        "publish-draft-metadata-update",
+                    )
+                    continue
+
+                append_unique(updated_records, work_id)
+                _emit_work_status(work_id, True, "UPDATE", "metadata-only")
+            else:
+                new_version_data = r.json()
+                new_record_id = new_version_data["id"]
+
+                prepared_file_paths, temp_bundle_dir = prepare_upload_file_paths(
+                    work_id, upload_file_paths
+                )
+                try:
+                    fails = upload_to_rdm(
+                        metadata=new_metadata_structure,
+                        elaute_id=work_id,
+                        file_paths=prepared_file_paths,
+                        RDM_API_TOKEN=RDM_API_TOKEN,
+                        RDM_API_URL=RDM_API_URL,
+                        ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
+                        record_id=new_record_id,
+                        force_metadata_only_update=FORCE_METADATA_ONLY_UPDATE,
+                    )
+                    failed_updates.extend(fails)
+                    if not fails:
+                        append_unique(updated_records, work_id)
+                        _emit_work_status(work_id, True, "UPDATE")
+                    else:
+                        _emit_work_status(work_id, False, "UPDATE")
+                finally:
+                    if temp_bundle_dir:
+                        shutil.rmtree(temp_bundle_dir, ignore_errors=True)
+
+        except Exception as exc:
             append_unique(failed_updates, work_id)
+            _emit_work_status(
+                work_id,
+                False,
+                "UPDATE",
+                f"unexpected-error: {_format_exception_detail(exc)}",
+            )
+            _emit_exception_debug(
+                work_id,
+                "UPDATE",
+                exc,
+                context={"record_id": record_id},
+            )
             continue
 
     return updated_records, list(dict.fromkeys(failed_updates))
@@ -751,6 +1018,7 @@ def upload_mei_files(work_ids):
 
         if not mei_file_paths or not upload_file_paths:
             append_unique(failed_uploads, work_id)
+            _emit_work_status(work_id, False, "NEW", "missing-input-files")
             continue
 
         try:
@@ -761,12 +1029,32 @@ def upload_mei_files(work_ids):
 
             if metadata_df.empty:
                 append_unique(failed_uploads, work_id)
+                _emit_work_status(work_id, False, "NEW", "metadata-extraction")
                 continue
 
             # Create RDM metadata
-            metadata = fill_out_basic_metadata_for_work(
-                metadata_df, people_df, corporate_df, len(mei_file_paths)
-            )
+            try:
+                metadata = fill_out_basic_metadata_for_work(
+                    metadata_df, people_df, corporate_df, len(mei_file_paths)
+                )
+            except KeyError as exc:
+                append_unique(failed_uploads, work_id)
+                _emit_work_status(
+                    work_id,
+                    False,
+                    "NEW",
+                    f"metadata-key-missing: {_format_exception_detail(exc)}",
+                )
+                _emit_exception_debug(
+                    work_id,
+                    "NEW",
+                    exc,
+                    context={
+                        "metadata_columns": list(metadata_df.columns),
+                        "mei_files": mei_file_paths,
+                    },
+                )
+                continue
 
             # ---- UPLOAD ---
 
@@ -783,12 +1071,28 @@ def upload_mei_files(work_ids):
                     ELAUTE_COMMUNITY_ID=ELAUTE_COMMUNITY_ID,
                 )
                 failed_uploads.extend(fails)
+                if fails:
+                    _emit_work_status(work_id, False, "NEW")
+                else:
+                    _emit_work_status(work_id, True, "NEW")
             finally:
                 if temp_bundle_dir:
                     shutil.rmtree(temp_bundle_dir, ignore_errors=True)
 
-        except Exception:
+        except Exception as exc:
             append_unique(failed_uploads, work_id)
+            _emit_work_status(
+                work_id,
+                False,
+                "NEW",
+                f"unexpected-error: {_format_exception_detail(exc)}",
+            )
+            _emit_exception_debug(
+                work_id,
+                "NEW",
+                exc,
+                context={"upload_files": upload_file_paths},
+            )
     return list(dict.fromkeys(failed_uploads))
 
 
@@ -813,7 +1117,9 @@ def main() -> int:
         SELECTED_UPLOAD_FILES = None
         _get_cached_candidate_upload_files()
 
-        new_work_ids, existing_work_ids = process_elaute_ids_for_update_or_create()
+        new_work_ids, existing_work_ids = (
+            process_elaute_ids_for_update_or_create()
+        )
         has_failures = False
 
         if len(new_work_ids) > 0:
@@ -829,7 +1135,8 @@ def main() -> int:
                 has_failures = True
 
         return 1 if has_failures else 0
-    except Exception:
+    except Exception as exc:
+        print(f"upload_meis.py fatal error: {_format_exception_detail(exc)}")
         return 1
 
 

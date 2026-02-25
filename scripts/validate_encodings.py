@@ -3,6 +3,7 @@
 import os
 import sys
 import io
+import argparse
 from lxml import etree
 import requests
 
@@ -13,15 +14,12 @@ def validate_mei_file(file_path, schema, errors):
             content = f.read()
         doc = etree.fromstring(content)
         schema.assertValid(doc)
-        print(f"✅ Validation successful for {file_path}")
     except etree.DocumentInvalid as e:
         error_msg = f"Validation failed for {file_path}: {e}"
         errors.append(error_msg)
-        print(f"❌ {error_msg}")
     except Exception as e:
         error_msg = f"Error processing {file_path}: {e}"
         errors.append(error_msg)
-        print(f"❌ {error_msg}")
 
 
 def find_mei_files(directory):
@@ -33,12 +31,13 @@ def find_mei_files(directory):
     return mei_files
 
 
-def main(directory):
+def main(directory, verbose=False):
     schemas = dict()
     errors = []
     mei_files = find_mei_files(directory)
     if not mei_files:
-        print("No .mei or .tei files found in the specified directory.")
+        if verbose:
+            print(f"No .mei/.tei files found in: {directory}")
         return True
 
     for mei_file in mei_files:
@@ -89,28 +88,50 @@ def main(directory):
             errors.append(f"Error parsing {mei_file}: {e}")
             continue
 
-    # Report all errors at the end
     if errors:
-        print("\n" + "=" * 50)
-        print("VALIDATION ERRORS SUMMARY:")
-        print("=" * 50)
-        for error in errors:
-            print(f"❌ {error}")
-        print(f"\nTotal errors found: {len(errors)}")
+        if verbose:
+            print(
+                f"Validation failed in {directory} with {len(errors)} issue(s):",
+                file=sys.stderr,
+            )
+            for error in errors:
+                print(f"- {error}", file=sys.stderr)
         return False
-    else:
-        print("\n✅ All MEI files validated successfully!")
-        return True
+
+    if verbose:
+        print(f"Validation OK: {len(mei_files)} file(s) checked in {directory}")
+    return True
 
 
 if __name__ == "__main__":
-    directory = os.environ["CALLER_REPO_PATH"]
-    print("Encodings_dir:", directory)
-    if not os.path.isdir(directory):
-        print(f"The specified path '{directory}' is not a directory.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate all .mei/.tei files in a directory recursively against "
+            "their declared RelaxNG schemas."
+        )
+    )
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        help=(
+            "Directory to validate. If omitted, uses the "
+            "CALLER_REPO_PATH environment variable."
+        ),
+    )
+    args = parser.parse_args()
+
+    directory = args.directory or os.environ.get("CALLER_REPO_PATH")
+    if not directory:
+        print(
+            "Error: provide a directory argument or set CALLER_REPO_PATH.",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    success = main(directory)
-    print("MEI validation completed.")
+
+    if not os.path.isdir(directory):
+        print(f"Error: not a valid directory: {directory}", file=sys.stderr)
+        sys.exit(1)
+    success = main(directory, verbose=True)
     if not success:
         sys.exit(1)
     sys.exit(0)

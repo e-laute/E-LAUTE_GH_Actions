@@ -9,6 +9,8 @@ TODO: add provenance generation
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -57,7 +59,6 @@ def resolve_caller_repo_path(
 def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
     exclude_file = caller_repo_path.joinpath("EXCLUDE.md")
     if not exclude_file.exists():
-        print(f"[INFO] Optional exclude file not found: {exclude_file}")
         return set()
 
     excluded: set[str] = set()
@@ -69,17 +70,18 @@ def parse_excluded_ids(caller_repo_path: Path) -> set[str]:
         line = re.sub(r"^[-*]\s*\[[ xX]\]\s*", "", line)
         line = re.sub(r"^[-*]\s*", "", line)
         line = line.strip().strip("`")
+        line = line.replace(r"\_", "_")
         if not line:
             continue
 
         candidate = re.split(r"\s+", line, maxsplit=1)[0]
+        candidate = candidate.replace(r"\_", "_")
         candidate = candidate.strip("`").strip(",;")
         if candidate:
             excluded.add(candidate)
             excluded.add(get_full_id_from_identifier(candidate))
             excluded.add(get_work_id_from_identifier(candidate))
 
-    print(f"[INFO] Excluded work_ids from EXCLUDE.md: {len(excluded)}")
     return excluded
 
 
@@ -132,74 +134,63 @@ def discover_eligible_ids(
         if folder.is_dir() and not folder.name.startswith(".")
     )
     eligible_ids: list[str] = []
-    excluded_folder_count = 0
     for folder_id in candidate_ids:
         folder_work_id = get_work_id_from_identifier(folder_id)
         if folder_id in excluded_ids or folder_work_id in excluded_ids:
-            excluded_folder_count += 1
             continue
         eligible_ids.append(folder_id)
-
-    matched_files_count = 0
-    invalid_files_count = 0
-    for folder_id in eligible_ids:
-        folder_path = caller_repo_path.joinpath(folder_id)
-        for file_path in sorted(
-            p for p in folder_path.rglob("*") if p.is_file()
-        ):
-            if not filename_matches(file_path.name):
-                invalid_files_count += 1
-                continue
-            matched_files_count += 1
-
-    print(f"[INFO] Eligible IDs discovered: {len(eligible_ids)}")
-    if excluded_folder_count > 0:
-        print(
-            "[INFO] ID folders excluded by EXCLUDE.md: "
-            f"{excluded_folder_count}"
-        )
-    print(
-        "[INFO] Source file scan complete: "
-        f"{matched_files_count} matching files, {invalid_files_count} ignored"
-    )
 
     return eligible_ids
 
 
 def run_validation(caller_repo_path: Path, eligible_ids: Iterable[str]) -> bool:
-    print("[STEP] Validation started.")
+    print("Validation...")
     failed_id_folders: list[str] = []
+    failure_logs: dict[str, str] = {}
 
     for folder_id in eligible_ids:
         id_folder = caller_repo_path.joinpath(folder_id)
-        print(f"[INFO] Validating folder: {id_folder}")
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
         try:
-            folder_valid = validate_encodings.main(str(id_folder))
+            with contextlib.redirect_stdout(
+                stdout_buffer
+            ), contextlib.redirect_stderr(stderr_buffer):
+                folder_valid = validate_encodings.main(str(id_folder))
         except Exception as exc:
-            print(f"[ERROR] Validation crashed for {folder_id}: {exc}")
             folder_valid = False
+            stderr_buffer.write(f"Unhandled validator exception: {exc}\n")
 
         if not folder_valid:
             failed_id_folders.append(folder_id)
+            stdout_value = stdout_buffer.getvalue().strip()
+            stderr_value = stderr_buffer.getvalue().strip()
+            log_parts: list[str] = []
+            if stdout_value:
+                log_parts.append("stdout:\n" + stdout_value)
+            if stderr_value:
+                log_parts.append("stderr:\n" + stderr_value)
+            failure_logs[folder_id] = (
+                "\n\n".join(log_parts)
+                if log_parts
+                else "No validator output captured."
+            )
 
     if failed_id_folders:
-        print(
-            "[WARN] Validation failed. All folders were checked before stopping."
-        )
-        print("[WARN] Failed folders:")
-        for folder_id in failed_id_folders:
-            print(f"  - {folder_id}")
+        print("Validation failed for: " + ", ".join(sorted(failed_id_folders)))
+        for folder_id in sorted(failed_id_folders):
+            print(f"\n--- Validation log for {folder_id} ---")
+            print(failure_logs.get(folder_id, "No validator output captured."))
         return False
 
-    print("[STEP] Validation completed successfully.")
+    print("Validation OK")
     return True
 
 
 def run_subprocess(
     command: list[str], cwd: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    print(f"[CMD] {' '.join(command)}")
-    result = subprocess.run(
+    return subprocess.run(
         command,
         cwd=str(cwd),
         env=env,
@@ -207,22 +198,17 @@ def run_subprocess(
         text=True,
         check=False,
     )
-    if result.stdout:
-        print(result.stdout.strip())
-    if result.stderr:
-        print(result.stderr.strip())
-    return result
 
 
 def run_derive_on_id_folders(
     repo_root: Path, caller_repo_path: Path, eligible_ids: Iterable[str]
 ) -> bool:
-    print("[STEP] Derive alternate notation files started.")
+    print("Derive notation files...")
     derive_script = repo_root.joinpath(
         "scripts", "derive-alternate-tablature-notation-types.py"
     )
     if not derive_script.exists():
-        print(f"[ERROR] Derive script not found: {derive_script}")
+        print("Derive step failed: derive script not found.")
         return False
 
     failed_ids: list[str] = []
@@ -236,68 +222,47 @@ def run_derive_on_id_folders(
             failed_ids.append(folder_id)
 
     if failed_ids:
-        print("[ERROR] Derive step failed for folders:")
-        for folder_id in failed_ids:
-            print(f"  - {folder_id}")
+        print("Derive failed for: " + ", ".join(sorted(failed_ids)))
         return False
 
-    print("[STEP] Derive step completed.")
+    print("Derive OK")
     return True
 
 
 def run_provenance_on_converted_mei_files(
     caller_repo_path: Path, eligible_ids: Iterable[str], excluded_ids: set[str]
 ) -> bool:
-    print("[STEP] Provenance generation for converted MEI files started.")
+    print("Generate provenance...")
     failed_files: list[str] = []
-    generated_count = 0
 
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
         converted_root = folder_root.joinpath("converted")
         if not converted_root.is_dir():
-            print(f"[WARN] Converted directory not found for {folder_id}: {converted_root}")
             continue
         converted_mei_files = sorted(
-            path.resolve()
-            for path in converted_root.rglob("*.mei")
+            path.resolve() for path in converted_root.rglob("*.mei")
         )
         for mei_path in converted_mei_files:
             work_id = get_work_id_from_filename(mei_path.name)
             if work_id in excluded_ids:
                 continue
             try:
-                output_path = generate_provenance.build_provenance_for_mei_file(
-                    mei_path
-                )
-                generated_count += 1
-                print(f"[INFO] Generated provenance: {output_path}")
+                generate_provenance.build_provenance_for_mei_file(mei_path)
             except Exception as exc:  # noqa: BLE001
+                _ = exc
                 failed_files.append(str(mei_path))
-                print(
-                    f"[ERROR] Failed provenance generation for {mei_path}: {exc}"
-                )
 
     if failed_files:
-        print("[ERROR] Provenance generation failed for files:")
-        for file_path in failed_files:
-            print(f"  - {file_path}")
+        print(f"Provenance failed for {len(failed_files)} file(s).")
         return False
 
-    print(
-        "[STEP] Provenance generation completed. "
-        f"TTL files created: {generated_count}"
-    )
+    print("Provenance OK")
     return True
 
 
 def export_generated_files_stub(generated_files: Iterable[str]) -> None:
-    print(
-        "[TODO] Export generated files to external target repository (not caller-repo)."
-    )
-    print(
-        f"[TODO] Generated files pending external export: {len(list(generated_files))}"
-    )
+    _ = generated_files
 
 
 def stage_converted_mei_files_by_id(
@@ -307,25 +272,21 @@ def stage_converted_mei_files_by_id(
 ) -> tuple[Path, dict[str, list[str]]]:
     staging_root = Path(tempfile.mkdtemp(prefix="elaute_release_")).resolve()
     files_by_id: dict[str, list[str]] = {}
-    excluded_files_count = 0
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
         converted_root = folder_root.joinpath("converted")
         if not converted_root.is_dir():
-            print(f"[WARN] Converted directory not found for {folder_id}: {converted_root}")
             files_by_id[folder_id] = []
             continue
         converted_sources = sorted(
             path.resolve()
             for path in converted_root.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() in {".mei", ".ttl"}
+            if path.is_file() and path.suffix.lower() in {".mei", ".ttl"}
         )
         staged_files: list[str] = []
         for source_path in converted_sources:
             work_id = get_work_id_from_filename(source_path.name)
             if work_id in excluded_ids:
-                excluded_files_count += 1
                 continue
             relative_path = source_path.relative_to(folder_root)
             target_path = staging_root.joinpath(folder_id, relative_path)
@@ -334,32 +295,17 @@ def stage_converted_mei_files_by_id(
             staged_files.append(str(target_path.resolve()))
 
         files_by_id[folder_id] = staged_files
-        print(
-            f"[INFO] Converted files prepared for upload ({folder_id}): "
-            f"{len(staged_files)}"
-        )
-    if excluded_files_count > 0:
-        print(
-            "[INFO] Converted files excluded by EXCLUDE.md: "
-            f"{excluded_files_count}"
-        )
-    print(f"[INFO] Staging root for converted upload files: {staging_root}")
     return staging_root, files_by_id
 
 
 def cleanup_converted_directories(
     caller_repo_path: Path, eligible_ids: Iterable[str]
 ) -> None:
-    removed_count = 0
     for folder_id in eligible_ids:
         folder_root = caller_repo_path.joinpath(folder_id)
         converted_dir = folder_root.joinpath("converted")
         if converted_dir.is_dir():
             shutil.rmtree(converted_dir, ignore_errors=True)
-            removed_count += 1
-    print(
-        f"[INFO] Removed converted directories from caller repo: {removed_count}"
-    )
 
 
 def run_upload_on_id_folders(
@@ -370,8 +316,10 @@ def run_upload_on_id_folders(
     converted_files_by_id: dict[str, list[str]],
     upload_mode: str,
 ) -> bool:
-    print(f"[STEP] Upload step started in mode '{upload_mode}'.")
+    print("Upload...")
+    print(f"Upload mode: {upload_mode}")
     failed_ids: list[str] = []
+    succeeded_ids: list[str] = []
 
     base_env = os.environ.copy()
     python_path = base_env.get("PYTHONPATH", "")
@@ -384,11 +332,8 @@ def run_upload_on_id_folders(
         id_folder = workspace_root_for_upload.joinpath(folder_id)
         selected_files = sorted(set(converted_files_by_id.get(folder_id, [])))
         if not selected_files:
-            print(
-                f"[ERROR] No converted files found for '{folder_id}'. "
-                "Upload requires converted/*.mei files."
-            )
             failed_ids.append(folder_id)
+            print(f"{folder_id}: FAILED (no upload files)")
             continue
 
         manifest_path = ""
@@ -418,16 +363,65 @@ def run_upload_on_id_folders(
         finally:
             if manifest_path:
                 Path(manifest_path).unlink(missing_ok=True)
+
+        # Show only concise per-record outcomes emitted by upload_to_rdm().
+        record_lines = [
+            line.strip()
+            for line in (result.stdout or "").splitlines()
+            if ": SUCCESS NEW" in line.strip()
+            or ": SUCCESS UPDATE" in line.strip()
+            or ": FAILED NEW" in line.strip()
+            or ": FAILED UPDATE" in line.strip()
+        ]
+        for line in record_lines:
+            print(f"{folder_id} -> {line}")
+
         if result.returncode != 0:
             failed_ids.append(folder_id)
+            expected_token_env = (
+                "RDM_TOKEN" if upload_mode == "testing" else "RDM_API_TOKEN_JJ"
+            )
+            token_present = bool(env.get(expected_token_env, ""))
+            print(
+                "Upload debug "
+                f"[{folder_id}]: mode={upload_mode}, "
+                f"returncode={result.returncode}, "
+                f"{expected_token_env}={'present' if token_present else 'missing'}"
+            )
+            print(
+                "Upload debug "
+                f"[{folder_id}]: command="
+                f"{sys.executable} -m upload_to_RDM.upload_meis --{upload_mode}"
+            )
+            stdout_excerpt = (result.stdout or "").strip()
+            stderr_excerpt = (result.stderr or "").strip()
+            if stdout_excerpt:
+                print(
+                    f"Upload debug [{folder_id}] stdout:\n"
+                    f"{stdout_excerpt[-4000:]}"
+                )
+            if stderr_excerpt:
+                print(
+                    f"Upload debug [{folder_id}] stderr:\n"
+                    f"{stderr_excerpt[-4000:]}"
+                )
+            if not record_lines:
+                print(f"{folder_id}: FAILED")
+        else:
+            succeeded_ids.append(folder_id)
+            if not record_lines:
+                print(f"{folder_id}: SUCCESS")
+
+    print(
+        "Upload summary: "
+        f"{len(succeeded_ids)} succeeded, {len(failed_ids)} failed"
+    )
 
     if failed_ids:
-        print("[ERROR] Upload step failed for folders:")
-        for folder_id in failed_ids:
-            print(f"  - {folder_id}")
+        print("Failed folders: " + ", ".join(sorted(failed_ids)))
         return False
 
-    print("[STEP] Upload step completed successfully.")
+    print("Upload OK")
     return True
 
 
@@ -439,36 +433,33 @@ def main() -> int:
     caller_repo_path = resolve_caller_repo_path(
         args.caller_repo_path, repo_root
     )
-    print(f"[INFO] Caller repo path: {caller_repo_path}")
     if not caller_repo_path.is_dir():
-        print(f"[ERROR] Caller repo path not found: {caller_repo_path}")
+        print("Release failed: caller repo path not found.")
         return 1
 
     excluded_ids = parse_excluded_ids(caller_repo_path)
     eligible_ids = discover_eligible_ids(caller_repo_path, excluded_ids)
     if not eligible_ids:
-        print("[WARN] No eligible ID folders found. Nothing to process.")
+        print("Nothing to process.")
         return 0
 
     validation_ok = run_validation(caller_repo_path, eligible_ids)
     if not validation_ok:
-        print("[ERROR] Release process stopped due to validation errors.")
+        print("Release failed at validation.")
         return 1
 
     derive_ok = run_derive_on_id_folders(
         repo_root, caller_repo_path, eligible_ids
     )
     if not derive_ok:
-        print("[ERROR] Release process stopped due to derive step errors.")
+        print("Release failed at derive step.")
         return 1
 
     provenance_ok = run_provenance_on_converted_mei_files(
         caller_repo_path, eligible_ids, excluded_ids
     )
     if not provenance_ok:
-        print(
-            "[ERROR] Release process stopped due to provenance generation errors."
-        )
+        print("Release failed at provenance step.")
         return 1
 
     staging_root, converted_files_by_id = stage_converted_mei_files_by_id(
@@ -479,7 +470,6 @@ def main() -> int:
         for folder_id in eligible_ids
         for file_path in converted_files_by_id.get(folder_id, [])
     ]
-    print(f"[INFO] Converted files prepared for upload: {len(converted_files)}")
 
     cleanup_converted_directories(caller_repo_path, eligible_ids)
 
@@ -496,12 +486,11 @@ def main() -> int:
         )
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
-        print(f"[INFO] Removed staging workspace: {staging_root}")
     if not upload_ok:
-        print("[ERROR] Release process stopped due to upload errors.")
+        print("Release failed at upload step.")
         return 1
 
-    print("[INFO] Release steps completed successfully.")
+    print("Release completed.")
     return 0
 
 

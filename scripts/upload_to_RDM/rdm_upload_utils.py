@@ -16,9 +16,7 @@ from urllib.parse import quote, urlparse
 
 import pandas as pd
 
-MIN_REQUEST_INTERVAL_SECONDS = float(
-    os.environ.get("RDM_MIN_REQUEST_INTERVAL_SECONDS", "0.35")
-)
+MIN_REQUEST_INTERVAL_SECONDS = 0.85
 _LAST_REQUEST_TS = 0.0
 
 
@@ -176,7 +174,9 @@ def load_selected_upload_files_from_env(error_collector=None):
 
     if not os.path.exists(manifest_path):
         if error_collector is not None:
-            error_collector.append(f"Upload manifest not found: {manifest_path}")
+            error_collector.append(
+                f"Upload manifest not found: {manifest_path}"
+            )
         return []
 
     selected_files = []
@@ -795,6 +795,7 @@ def upload_to_rdm(
     RDM_API_URL,
     ELAUTE_COMMUNITY_ID,
     record_id=None,
+    force_metadata_only_update=False,
 ):
     metadata = _ensure_elaute_identifier(metadata, elaute_id)
     new_upload = record_id is None
@@ -811,14 +812,19 @@ def upload_to_rdm(
         if elaute_id not in failed_uploads:
             failed_uploads.append(elaute_id)
 
+    def _log_step(message):
+        print(f"{elaute_id} [STEP] {message}")
+
     def _record_error(message, step="unknown"):
         nonlocal failed_step
         if failed_step is None:
             failed_step = step
         record_errors.append(message)
+        print(f"{elaute_id} [ERROR] {step}: {message}")
 
     try:
         if not new_upload:
+            _log_step("fetch existing record")
             metadata_payload = _extract_metadata_payload(metadata)
             fields_to_compare = [
                 "title",
@@ -850,14 +856,23 @@ def upload_to_rdm(
                 metadata_payload,
                 fields_to_compare,
             )
-            files_changed = _files_changed_for_update(
-                record_id, local_file_paths, h, RDM_API_URL
-            )
+            _log_step("compare metadata and file checksums")
+            if force_metadata_only_update:
+                files_changed = False
+                _log_step(
+                    "force metadata-only update: treat files_changed as False"
+                )
+            else:
+                files_changed = _files_changed_for_update(
+                    record_id, local_file_paths, h, RDM_API_URL
+                )
 
             if not metadata_changed and not files_changed:
+                _log_step("no changes detected")
                 return failed_uploads
 
             if files_changed:
+                _log_step("create new version draft")
                 # File changes require a new version draft.
                 r = rdm_request(
                     "POST",
@@ -877,6 +892,7 @@ def upload_to_rdm(
                 record_id = new_record_id
 
                 # Explicitly enter draft edit mode for the new version draft.
+                _log_step("open draft for version")
                 r = rdm_request(
                     "POST",
                     f"{RDM_API_URL}/records/{record_id}/draft",
@@ -892,6 +908,7 @@ def upload_to_rdm(
                     return failed_uploads
             else:
                 # Metadata-only updates edit the currently published record draft.
+                _log_step("open draft for metadata update")
                 r = rdm_request(
                     "POST",
                     f"{RDM_API_URL}/records/{record_id}/draft",
@@ -906,6 +923,7 @@ def upload_to_rdm(
                     _mark_failed()
                     return failed_uploads
 
+            _log_step("update draft metadata")
             r = rdm_request(
                 "PUT",
                 f"{RDM_API_URL}/records/{record_id}/draft",
@@ -927,6 +945,7 @@ def upload_to_rdm(
             # If file differences were detected, start from previous-version files
             # and only apply local delta.
             if files_changed:
+                _log_step("sync draft files")
                 sync_errors = _sync_draft_files_with_local(
                     record_id=record_id,
                     local_file_paths=local_file_paths,
@@ -941,9 +960,27 @@ def upload_to_rdm(
                     _mark_failed()
                     return failed_uploads
 
-            # Requested behavior: for existing records, do not publish.
+            if not files_changed:
+                _log_step("publish updated draft")
+                r = rdm_request(
+                    "POST",
+                    f"{RDM_API_URL}/records/{record_id}/draft/actions/publish",
+                    headers=h,
+                )
+                if r.status_code not in (200, 201, 202):
+                    _record_error(
+                        "Failed to publish updated draft for record "
+                        f"{record_id} (code: {r.status_code}) "
+                        f"response: {r.text[:300]}",
+                        step="publish_updated_draft",
+                    )
+                    _mark_failed()
+                    return failed_uploads
+
+            _log_step("update flow complete")
             return failed_uploads
 
+        _log_step("create new record draft")
         # Create new draft record
         r = rdm_request(
             "POST",
@@ -964,8 +1001,10 @@ def upload_to_rdm(
         record_id = r.json()["id"]
 
         # Keep current per-file initialization behavior for new records.
+        _log_step(f"initialize/upload {len(local_file_paths)} file(s)")
         for file_path in local_file_paths:
             filename = file_path.name
+            _log_step(f"upload file {filename}")
             r = rdm_request(
                 "POST",
                 links["files"],
@@ -992,6 +1031,7 @@ def upload_to_rdm(
                 _mark_failed()
                 return failed_uploads
 
+        _log_step("set community review")
         # Set community review request first.
         r = rdm_request(
             "PUT",
@@ -1014,6 +1054,7 @@ def upload_to_rdm(
             _mark_failed()
             return failed_uploads
 
+        _log_step("create curation")
         # Create curation request for the record.
         r = rdm_request(
             "POST",
@@ -1031,6 +1072,7 @@ def upload_to_rdm(
             _mark_failed()
             return failed_uploads
 
+        _log_step("submit review")
         # Submit community review request.
         r = rdm_request(
             "POST",
@@ -1047,6 +1089,7 @@ def upload_to_rdm(
             _mark_failed()
             return failed_uploads
 
+        _log_step("new upload flow complete")
         return failed_uploads
     except Exception as exc:
         _record_error(
@@ -1055,13 +1098,6 @@ def upload_to_rdm(
         )
         _mark_failed()
         return failed_uploads
-    finally:
-        status = "FAILED" if failed_uploads else "SUCCESS"
-        if status == "FAILED":
-            step = failed_step or "unknown"
-            print(f"{elaute_id}: FAILED ({step})")
-        else:
-            print(f"{elaute_id}: SUCCESS")
 
 
 def compare_hashed_files(current_value, new_value):
